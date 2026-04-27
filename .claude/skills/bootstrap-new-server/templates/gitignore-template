@@ -1,0 +1,59 @@
+# gitignore для infra-репо нового сервера.
+# Копируется в $INFRA_DIR/.gitignore при bootstrap'е.
+
+# === СЕКРЕТЫ — НИКОГДА в git ===
+.env
+.env.local
+.env.production
+.env.*
+!.env.example         # негация: .env.example можно коммитить (без реальных значений)
+*.key
+*.pem
+*.crt
+*.p12
+authorized_keys
+id_rsa*
+id_ed25519*
+known_hosts
+
+# === Снимки сервера — большие, локальные, генерируются скриптом ===
+inventory/snapshots/
+snapshots/
+
+# === Бэкапы из инструментов ===
+*.bak
+*.backup
+*.old
+*.orig
+
+# === OS / IDE ===
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*~
+.~lock.*
+
+# === Логи ===
+*.log
+logs/
+
+# === Локальные временные файлы ===
+tmp/
+*.tmp
+.cache/
+
+# === Node / Python (если в репо есть скрипты на этих языках) ===
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# === Docker ===
+# Содержимое volumes НЕ должно быть в git, но компоуз-файлы — должны.
+# Не блокируем docker-compose.yml, но блокируем data-папки:
+*/data/
+*/postgres-data/
+*/redis-data/

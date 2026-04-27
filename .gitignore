@@ -1,0 +1,19 @@
+# Личная конфигурация агента — НИКОГДА не коммитится в публичный репо.
+# Содержит реальные SSH-алиасы, домены, имя Telegram-бота оператора.
+sysadmin-config.json
+
+# Публичные шаблоны и схема — коммитятся (negation override правила выше)
+!sysadmin-config.example.json
+!sysadmin-config.schema.json
+
+# Мусор macOS
+.DS_Store
+._*
+
+# Редакторские
+.vscode/
+.idea/
+*.swp
+
+# Claude Code служебные файлы
+.claude/scheduled_tasks.lock

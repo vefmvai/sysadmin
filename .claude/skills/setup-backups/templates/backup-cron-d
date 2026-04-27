@@ -1,0 +1,18 @@
+# /etc/cron.d/backup — расписание бэкапов
+#
+# Установка:
+#   install -m 0644 templates/backup-cron-d /etc/cron.d/backup
+#   systemctl reload cron  # или systemctl status cron — на ряде дистрибутивов перечитка автоматическая
+#
+# Шаблон. Замените пути на актуальные для вашего сервера, если /opt/backup/ другой.
+
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+MAILTO=""
+
+# Полный бэкап раз в сутки в 03:00 UTC (наименьшая нагрузка на прод)
+0 3 * * * root /opt/backup/backup-all.sh >> /var/log/backup-cron.log 2>&1
+
+# Проверка возраста последнего snapshot — раз в сутки в 09:00 UTC
+# (после того как ночной бэкап точно завершился; алерт если старше 36ч)
+0 9 * * * root /opt/backup/check-backup-age.sh >> /var/log/backup-cron.log 2>&1

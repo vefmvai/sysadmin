@@ -1,0 +1,33 @@
+# dockge-compose.yml — Dockge (web UI для управления docker compose)
+#
+# Установка:
+#   cp templates/dockge-compose.yml /opt/monitoring/dockge.yml
+#   cd /opt/monitoring && docker compose -f dockge.yml up -d
+#
+# Dockge управляет stack'ами в /opt/stacks (по умолчанию) — это точка монтажа compose-файлов.
+
+services:
+  dockge:
+    image: louislam/dockge:1.5.0
+    container_name: dockge
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5001:5001"
+    volumes:
+      # Управление через Docker Compose
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Внутренние данные Dockge (учётки, history)
+      - ./dockge_data:/app/data
+      # Stacks: место, где Dockge видит и редактирует compose-файлы
+      # ВАЖНО: путь внутри контейнера и снаружи должен совпадать
+      - /opt/stacks:/opt/stacks
+    environment:
+      # Каталог stacks внутри контейнера (должен совпадать с маунтом выше)
+      - DOCKGE_STACKS_DIR=/opt/stacks
+    networks:
+      - monitoring
+
+networks:
+  monitoring:
+    external: true
+    name: monitoring

@@ -1,0 +1,34 @@
+# dozzle-compose.yml — Dozzle (live-логи Docker-контейнеров)
+#
+# Установка:
+#   cp templates/dozzle-compose.yml /opt/monitoring/dozzle.yml
+#   cd /opt/monitoring && docker compose -f dozzle.yml up -d
+
+services:
+  dozzle:
+    image: amir20/dozzle:v10.4.1
+    container_name: dozzle
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./dozzle_data:/data
+    environment:
+      # Встроенная авторизация — пользователи в users.yml
+      # (Basic Auth на nginx уровне ИЛИ Dozzle simple — выбирай одно, не оба)
+      - DOZZLE_AUTH_PROVIDER=simple
+      # Slug префикс — чтобы можно было проксировать через panel.$DOMAIN/dozzle/
+      - DOZZLE_BASE=/dozzle
+    networks:
+      - monitoring
+    healthcheck:
+      test: ["CMD", "/dozzle", "healthcheck"]
+      interval: 60s
+      timeout: 5s
+      retries: 5
+
+networks:
+  monitoring:
+    external: true
+    name: monitoring

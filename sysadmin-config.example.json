@@ -1,0 +1,38 @@
+{
+  "$schema": "./sysadmin-config.schema.json",
+  "version": "1.0",
+  "language": "ru",
+  "meta": {
+    "onboarding_completed": false,
+    "onboarding_completed_at": null
+  },
+  "operator": {
+    "name": "Имя оператора",
+    "timezone": "UTC"
+  },
+  "secrets": {
+    "manager": "keychain"
+  },
+  "monitoring": {
+    "enabled": false
+  },
+  "backups": {
+    "enabled": false
+  },
+  "notifications": {
+    "telegram": {
+      "enabled": false
+    }
+  },
+  "servers": [
+    {
+      "alias": "my-server",
+      "ssh_alias": "my-server",
+      "role": "production",
+      "domain": "example.com"
+    }
+  ],
+  "infrastructure": {
+    "root_path": "~/path/to/your/infra"
+  }
+}

@@ -1,0 +1,39 @@
+# uptime-kuma-compose.yml — Uptime Kuma 2.x для проверок доступности
+#
+# Установка:
+#   cp templates/uptime-kuma-compose.yml /opt/monitoring/docker-compose.yml
+#   cd /opt/monitoring && docker compose up -d
+#
+# Настройка после старта — через scripts/configure-kuma-via-api.sh (socket.io API).
+# Привязка только на 127.0.0.1 — внешний доступ через nginx с Basic Auth.
+
+services:
+  uptime-kuma:
+    # Версия запинена. Не использовать плавающий тег — Docker Compose recreate'ит контейнер
+    # каждый `up -d`, даже если digest не изменился. См. references/component-tradeoffs.md.
+    image: louislam/uptime-kuma:2.2.1
+    container_name: uptime-kuma
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3001:3001"
+    volumes:
+      - uptime-kuma-data:/app/data
+      # Монтируем docker.sock в read-only — нужен для Docker container monitor
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - monitoring
+    healthcheck:
+      test: ["CMD", "node", "extra/healthcheck.js"]
+      interval: 60s
+      timeout: 30s
+      retries: 5
+      start_period: 60s
+
+volumes:
+  uptime-kuma-data:
+    driver: local
+
+networks:
+  monitoring:
+    driver: bridge
+    # internal: false — Kuma должна делать исходящие HTTP-запросы для проверок

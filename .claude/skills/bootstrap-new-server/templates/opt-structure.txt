@@ -1,0 +1,23 @@
+# Шаблон структуры /opt/ для нового сервера.
+# Каждая строка — путь, который должен существовать после bootstrap.
+# Пустые строки и строки начинающиеся с # — комментарии.
+
+# Стек мониторинга (Uptime Kuma + Beszel + Dozzle + Dockge или альтернативы).
+/opt/monitoring/
+
+# Кастомный admin-dashboard (Fastify + htmx или аналог).
+/opt/admin-panel/
+
+# Общие БД (PostgreSQL/Redis), которые шарятся между приложениями.
+/opt/shared-db/
+
+# Приложения (по одной папке на проект).
+/opt/apps/
+
+# Git-репозиторий с инфраструктурным кодом (compose, скрипты, документация).
+/opt/infra/
+/opt/infra/decisions/
+/opt/infra/incidents/
+/opt/infra/runbooks/
+/opt/infra/inventory/
+/opt/infra/scripts/

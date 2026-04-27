@@ -1,0 +1,46 @@
+# docker-compose.yml — заготовка для нового сервиса (deploy-service skill).
+#
+# Заменить плейсхолдеры:
+#   <SERVICE_NAME>  — имя сервиса в kebab-case (например, my-app, kuma, ghost)
+#   <IMAGE>         — pinned tag (например, ghost:5.87.2 — НЕ :latest;
+#                     принцип pin'а — ADR 0010 проекта-носителя или эквивалент)
+#   <PORT>          — внутренний порт контейнера
+#   <NETWORK>       — сеть для подключения (services / data — см. ADR 0012
+#                     или эквивалентное решение по сегментации сетей)
+#   <MEM_LIMIT>     — лимит памяти (256m / 512m / 1g — принцип ADR 0009
+#                     или эквивалент: peak_observed × 1.5)
+#
+# После замены — git add, git commit, ./scripts/deploy/deploy-remote.sh.
+
+services:
+  <SERVICE_NAME>:
+    image: <IMAGE>
+    container_name: <SERVICE_NAME>
+    restart: unless-stopped
+    env_file: .env
+    networks:
+      - <NETWORK>
+    # volumes:
+    #   - <SERVICE_NAME>_data:/var/lib/<SERVICE_NAME>
+    mem_limit: <MEM_LIMIT>
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "--max-time", "3", "http://localhost:<PORT>/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    labels:
+      com.infra.owner: "<SERVICE_NAME>"
+      com.infra.deploy-pattern: "push-to-pull"  # ADR 0015 проекта-носителя или эквивалент
+
+networks:
+  <NETWORK>:
+    external: true
+
+# volumes:
+#   <SERVICE_NAME>_data:

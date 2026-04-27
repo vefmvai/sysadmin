@@ -1,0 +1,41 @@
+# .env.example — шаблон секретов для нового сервиса (deploy-service skill).
+#
+# ВАЖНО: значения в этом файле — только ПЛЕЙСХОДЕРЫ или ССЫЛКИ на менеджер паролей.
+# Реальные значения подставляются на сервере в /opt/infra/services/<SERVICE_NAME>/.env
+# (этот файл в .gitignore, права 0600 root, никогда в git).
+#
+# Источник секретов: Keychain macOS (см. inventory/shared/access.md).
+# Для DR-сценария секреты восстанавливаются из Keychain через скилл setup-secrets-vault.
+#
+# Заменить:
+#   <SERVICE_NAME> — имя сервиса
+#
+# Для каждой переменной указывай:
+#   - имя переменной
+#   - где взять значение (keychain://infra/<service>/<key> или комментарий)
+
+# === Application secrets ===
+# APP_SECRET=<keychain://infra/<SERVICE_NAME>/app-secret>
+# JWT_SIGNING_KEY=<keychain://infra/<SERVICE_NAME>/jwt-key>
+
+# === Database (если используется shared-db) ===
+# DB_HOST=postgres                  # network alias в сети data
+                                    # (ADR 0012 проекта-носителя или эквивалент по сегментации сетей)
+# DB_PORT=5432
+# DB_NAME=<SERVICE_NAME>
+# DB_USER=<SERVICE_NAME>_app
+# DB_PASSWORD=<keychain://infra/<SERVICE_NAME>/db-password>
+
+# === Redis (если нужен) ===
+# REDIS_HOST=redis
+# REDIS_PORT=6379
+# REDIS_PASSWORD=<keychain://infra/redis/password>
+
+# === Внешние API ===
+# OPENAI_API_KEY=<keychain://shared/openai-api-key>
+# TELEGRAM_BOT_TOKEN=<keychain://infra/<SERVICE_NAME>/telegram-token>
+
+# === Что НЕ писать в этот файл ===
+# - Реальные пароли (ни в .env.example, ни в .env в git)
+# - Имена приватных доменов клиентов
+# - Любые токены, к которым ещё кто-то имеет доступ

@@ -1,0 +1,304 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/vefmvai/infra/sysadmin-config.schema.json",
+  "title": "Sysadmin Agent Configuration",
+  "description": "Формальный контракт конфигурационного файла агента-сисадмина. Описывает обязательные и опциональные поля sysadmin-config.json. Используется скиллом /sysadmin-init для валидации и как самодокументация (поле description в каждом свойстве — текст вопроса оператору).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "language", "secrets", "monitoring", "backups", "notifications", "servers", "infrastructure"],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Ссылка на эту схему. Позволяет редакторам (VS Code, JetBrains) подсвечивать ошибки и предлагать автодополнение."
+    },
+    "version": {
+      "type": "string",
+      "const": "1.0",
+      "description": "Версия формата конфига. Сейчас единственное допустимое значение — \"1.0\". Когда появится \"2.0\", скилл /sysadmin-init будет уметь мигрировать v1 → v2."
+    },
+    "meta": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Служебные метаданные о состоянии onboarding пользователя. Используется агентом и скиллом /sysadmin-meet чтобы понимать, прошёл ли пользователь знакомство с агентом, и нужно ли мягко напоминать про /sysadmin-meet при каждом холодном старте.",
+      "properties": {
+        "onboarding_completed": {
+          "type": "boolean",
+          "description": "Прошёл ли пользователь знакомство с агентом (скилл /sysadmin-meet) или явно отказался от напоминаний. true — напоминания не показываются, агент работает молча. false — при каждом Cold Start агент мягко напоминает про /sysadmin-meet и предлагает выключить напоминания фразой типа «не хочу учиться»."
+        },
+        "onboarding_completed_at": {
+          "type": ["string", "null"],
+          "description": "ISO 8601 timestamp момента, когда onboarding_completed стал true (либо через прохождение /sysadmin-meet, либо через явный отказ пользователя). null — пока не было перехода в true. Используется для отладки и истории."
+        }
+      }
+    },
+    "language": {
+      "type": "string",
+      "enum": ["ru", "en"],
+      "description": "Язык общения агента с оператором. ru — русский (по умолчанию), en — английский."
+    },
+    "operator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "timezone"],
+      "description": "Информация об операторе агента. Используется в обращениях («Вася, обрати внимание...») и для timestamp'ов.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Имя оператора (как агенту обращаться)."
+        },
+        "timezone": {
+          "type": "string",
+          "minLength": 1,
+          "description": "IANA-имя часового пояса оператора (например, Europe/Moscow, UTC, Asia/Yekaterinburg). Используется для отметок времени в логах и отчётах."
+        }
+      }
+    },
+    "secrets": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["manager"],
+      "description": "Менеджер паролей оператора. Агент НИКОГДА не хранит пароли в репо — только в указанном менеджере.",
+      "properties": {
+        "manager": {
+          "type": "string",
+          "enum": ["keychain", "bitwarden", "1password", "pass"],
+          "description": "Где оператор хранит секреты. keychain — встроенный в macOS Keychain (по умолчанию для Mac). bitwarden — облачный менеджер с CLI bw. 1password — облачный менеджер с CLI op. pass — Unix password manager на gpg (для Linux-headless)."
+        }
+      }
+    },
+    "monitoring": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled"],
+      "description": "Подсистема мониторинга. Если enabled=true — агент использует готовые UI-панели (Uptime Kuma / Beszel / Dozzle / Dockge / Diun). Если enabled=false — мониторинга нет, агент работает «вслепую» по запросу.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Включён ли стек мониторинга. true — на сервере развёрнут хотя бы один компонент мониторинг-стека. false — мониторинга нет."
+        },
+        "stack": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": ["uptime-kuma", "beszel", "dozzle", "dockge", "diun"]
+          },
+          "description": "Список развёрнутых компонентов мониторинг-стека. uptime-kuma — uptime + алерты. beszel — метрики хоста (CPU/RAM/Disk). dozzle — просмотр логов в браузере. dockge — управление compose-стеками. diun — отслеживание обновлений Docker-образов."
+        },
+        "panel_domain": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Поддомен с админ-панелью мониторинга (например, sysadmin.example.com). Через него оператор открывает все UI-компоненты по единому Basic Auth."
+        }
+      }
+    },
+    "backups": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled"],
+      "description": "Подсистема бэкапов. Если enabled=true — агент знает, куда складываются бэкапы и как проверять их свежесть. Если enabled=false — бэкапы не настроены (не для production!).",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Включена ли подсистема бэкапов. true — restic + rclone настроены, бэкапы регулярно уезжают в указанный destination. false — бэкапов нет."
+        },
+        "destination": {
+          "type": "string",
+          "enum": ["yandex-disk-webdav", "nextcloud-webdav", "owncloud-webdav", "s3", "b2", "local"],
+          "description": "Куда складываются бэкапы. *-webdav — облачные хранилища через WebDAV (требуют rclone-remote). s3 — Amazon S3 или совместимое (Selectel/Wasabi/MinIO). b2 — Backblaze B2. local — локально на сервере (только для тестов, не для prod!)."
+        },
+        "rclone_remote": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Имя rclone-remote'а из ~/.config/rclone/rclone.conf (для webdav-destination'ов). Например, yadisk-backup. ОБЯЗАТЕЛЬНО при destination=*-webdav."
+        },
+        "retention": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["daily", "weekly", "monthly"],
+          "description": "Сколько копий хранить (политика retention restic).",
+          "properties": {
+            "daily": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Сколько ежедневных копий хранить (типично 7)."
+            },
+            "weekly": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Сколько еженедельных копий хранить (типично 4)."
+            },
+            "monthly": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Сколько ежемесячных копий хранить (типично 6)."
+            }
+          }
+        }
+      }
+    },
+    "notifications": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Каналы уведомлений. Сейчас единственный канал — Telegram-бот. В будущем добавятся email/slack/discord.",
+      "properties": {
+        "telegram": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled"],
+          "description": "Telegram-бот для алертов от мониторинга и бэкапов.",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Включён ли Telegram-канал. true — бот создан через @BotFather, его токен лежит в менеджере паролей."
+            },
+            "bot_username": {
+              "type": "string",
+              "pattern": "^[a-zA-Z][a-zA-Z0-9_]{4,31}$",
+              "description": "Username бота БЕЗ символа @ (например, mysysadmin_bot). Должен начинаться с буквы, длина 5-32 символа, разрешены латиница/цифры/подчёркивания."
+            },
+            "chat_type": {
+              "type": "string",
+              "enum": ["personal", "channel"],
+              "description": "Куда бот шлёт алерты. personal — в личный чат с оператором. channel — в публичный/приватный канал (нужен chat_id в формате -100...)."
+            }
+          }
+        }
+      }
+    },
+    "servers": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Список серверов под управлением агента. Минимум 1 (хотя бы один сервер должен быть указан, иначе агенту нечего администрировать).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["alias", "ssh_alias", "role"],
+        "properties": {
+          "alias": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Внутреннее имя сервера в inventory (например, prod, staging-eu, test-local). Используется в путях inventory/hosts/<alias>/."
+          },
+          "ssh_alias": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Имя Host из ~/.ssh/config (например, my-server, prod-vps). Через него агент выполняет ssh-команды без указания IP/user."
+          },
+          "role": {
+            "type": "string",
+            "enum": ["production", "staging", "test", "personal"],
+            "description": "Роль сервера. production — боевой (повышенная осторожность, обязательны бэкапы). staging — предпрод. test — тестовый. personal — личный/домашний."
+          },
+          "domain": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Основной домен, обслуживаемый сервером (опционально). Например, example.com."
+          }
+        }
+      }
+    },
+    "infrastructure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["root_path"],
+      "description": "Где живёт твоя папка с инфраструктурой (карта серверов, ADR, инциденты, runbook'и). После разнесения публичного агента и приватных данных в этапе 10 — это разные папки. Агент при Cold Start читает конфиг из этой папки (sysadmin/), а из конфига узнаёт где `infra/`, и идёт читать inventory оттуда.",
+      "properties": {
+        "root_path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Абсолютный или относительный путь к папке с твоей инфраструктурой. Примеры: `~/projects/my-infra` (с tilde), `../infra` (относительный, если sysadmin/ и infra/ — соседи), `/home/user/work/infra` (полный абсолютный). Папка должна существовать к моменту первой работы агента — но при первом запуске /sysadmin-init может ещё не существовать, скилл предложит её создать."
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "description": "Если monitoring.enabled=true → обязательны stack и panel_domain.",
+      "if": {
+        "properties": {
+          "monitoring": {
+            "properties": { "enabled": { "const": true } },
+            "required": ["enabled"]
+          }
+        },
+        "required": ["monitoring"]
+      },
+      "then": {
+        "properties": {
+          "monitoring": {
+            "required": ["enabled", "stack", "panel_domain"]
+          }
+        }
+      }
+    },
+    {
+      "description": "Если backups.enabled=true → обязательны destination и retention.",
+      "if": {
+        "properties": {
+          "backups": {
+            "properties": { "enabled": { "const": true } },
+            "required": ["enabled"]
+          }
+        },
+        "required": ["backups"]
+      },
+      "then": {
+        "properties": {
+          "backups": {
+            "required": ["enabled", "destination", "retention"]
+          }
+        }
+      }
+    },
+    {
+      "description": "Если backups.destination — webdav-вариант → обязателен rclone_remote (имя remote'а в rclone.conf). Защита от Грабли 3 из 09-RESEARCH.md.",
+      "if": {
+        "properties": {
+          "backups": {
+            "properties": {
+              "enabled": { "const": true },
+              "destination": { "enum": ["yandex-disk-webdav", "nextcloud-webdav", "owncloud-webdav"] }
+            },
+            "required": ["enabled", "destination"]
+          }
+        },
+        "required": ["backups"]
+      },
+      "then": {
+        "properties": {
+          "backups": {
+            "required": ["enabled", "destination", "retention", "rclone_remote"]
+          }
+        }
+      }
+    },
+    {
+      "description": "Если notifications.telegram.enabled=true → обязательны bot_username и chat_type.",
+      "if": {
+        "properties": {
+          "notifications": {
+            "properties": {
+              "telegram": {
+                "properties": { "enabled": { "const": true } },
+                "required": ["enabled"]
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "notifications": {
+            "properties": {
+              "telegram": {
+                "required": ["enabled", "bot_username", "chat_type"]
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

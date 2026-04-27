@@ -1,0 +1,28 @@
+{
+  "$schema": "./sysadmin-config.schema.json",
+  "version": "1.0",
+  "language": "__FILL__",
+  "meta": {
+    "onboarding_completed": false,
+    "onboarding_completed_at": null
+  },
+  "operator": {
+    "name": "__FILL__",
+    "timezone": "__FILL__"
+  },
+  "secrets": {
+    "manager": "__FILL__"
+  },
+  "monitoring": {
+    "enabled": false
+  },
+  "backups": {
+    "enabled": false
+  },
+  "notifications": {
+    "telegram": {
+      "enabled": false
+    }
+  },
+  "servers": []
+}

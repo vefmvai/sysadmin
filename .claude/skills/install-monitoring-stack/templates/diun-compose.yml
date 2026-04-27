@@ -1,0 +1,43 @@
+# diun-compose.yml — Diun (Docker Image Update Notifier)
+#
+# Установка:
+#   cp templates/diun-compose.yml /opt/monitoring/diun.yml
+#   cd /opt/monitoring && docker compose -f diun.yml up -d
+#
+# Diun сканирует label'ы Docker-контейнеров и compose-файлы в /opt — присылает Telegram-уведомление,
+# когда выходит новая версия образа. Слать алерт != автоматически обновлять — обновление
+# по решению оператора.
+
+services:
+  diun:
+    image: crazymax/diun:0.66
+    container_name: diun
+    restart: unless-stopped
+    command: serve
+    volumes:
+      # Конфиг providers — Diun смотрит compose-файлы в /opt
+      - ./diun.yml:/diun.yml:ro
+      - ./diun_data:/data
+      # Watch live containers
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # File provider — compose-файлы в /opt
+      - /opt:/opt:ro
+    environment:
+      - TZ=UTC
+      - LOG_LEVEL=info
+      - DIUN_WATCH_WORKERS=10
+      - DIUN_WATCH_SCHEDULE=0 0 * * *  # ежедневно в полночь UTC
+      # Telegram — apprise URL формат, см. https://crazymax.dev/diun/notif/telegram/
+      - DIUN_NOTIF_TELEGRAM_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - DIUN_NOTIF_TELEGRAM_CHATIDS=${TELEGRAM_CHAT_ID:-}
+      # Docker provider — следит за live контейнерами
+      - DIUN_PROVIDERS_DOCKER=true
+      # File provider — compose-файлы
+      - DIUN_PROVIDERS_FILE_DIRECTORY=/opt
+    networks:
+      - monitoring
+
+networks:
+  monitoring:
+    external: true
+    name: monitoring

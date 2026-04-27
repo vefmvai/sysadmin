@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# pre-commit hook: блокирует коммит, если gitleaks нашёл секреты.
+# Если gitleaks не установлен — выводит warning, но НЕ блокирует коммит,
+# чтобы новый оператор не застрял на старте без gitleaks в PATH.
+#
+# Установка вручную (если bootstrap-скрипт не сделал):
+#   cp templates/pre-commit-gitleaks .git/hooks/pre-commit
+#   chmod +x .git/hooks/pre-commit
+#
+# Установка gitleaks:
+#   - Linux: https://github.com/gitleaks/gitleaks/releases (бинарник в /usr/local/bin)
+#   - macOS: brew install gitleaks
+#   - Docker: docker run --rm -v "$(pwd)":/repo zricethezav/gitleaks:latest protect --staged --redact -v --source=/repo
+
+set -e
+
+if ! command -v gitleaks &>/dev/null; then
+    echo "[pre-commit] WARNING: gitleaks не установлен в PATH. Пропускаю проверку."
+    echo "[pre-commit] Это временно (чтобы не блокировать старт), но установи в ближайшее время."
+    echo "[pre-commit] Установка: https://github.com/gitleaks/gitleaks#installing"
+    exit 0
+fi
+
+echo "[pre-commit] gitleaks: проверяю staged-файлы..."
+if gitleaks protect --staged --redact -v; then
+    echo "[pre-commit] gitleaks: чисто, продолжаю commit."
+    exit 0
+else
+    echo ""
+    echo "[pre-commit] ============================================================"
+    echo "[pre-commit] gitleaks НАШЁЛ СЕКРЕТЫ В STAGED-ФАЙЛАХ!"
+    echo "[pre-commit] Коммит ЗАБЛОКИРОВАН."
+    echo "[pre-commit]"
+    echo "[pre-commit] Что делать:"
+    echo "[pre-commit]   1. Убери секреты из staged-файлов (git restore --staged <файл>)."
+    echo "[pre-commit]   2. Перенеси значения в менеджер паролей (см. setup-secrets-vault)."
+    echo "[pre-commit]   3. Закоммить только безопасные изменения."
+    echo "[pre-commit]"
+    echo "[pre-commit] Если это false-positive — добавь правило в .gitleaksignore."
+    echo "[pre-commit] ============================================================"
+    exit 1
+fi
