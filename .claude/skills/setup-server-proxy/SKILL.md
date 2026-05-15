@@ -197,7 +197,7 @@ override и доложить оператору.
 
 ## Шаг 6: Smoke test
 
-`scripts/99-smoke-test.sh` через свежий SSH:
+`scripts/05-smoke-test.sh` через свежий SSH:
 
 ```bash
 ssh $SSH_TARGET "source /etc/environment; curl -sI https://api.anthropic.com" → HTTP/2 ...
