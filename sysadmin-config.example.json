@@ -34,5 +34,13 @@
   ],
   "infrastructure": {
     "root_path": "~/path/to/your/infra"
+  },
+  "vpn": {
+    "enabled": false,
+    "panel_url": null,
+    "panel_web_base_path": null,
+    "server_proxy_enabled": false,
+    "upstream_kind": "none",
+    "default_reality_dest": "www.cloudflare.com"
   }
 }

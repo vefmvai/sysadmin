@@ -211,6 +211,39 @@
           "description": "Абсолютный или относительный путь к папке с твоей инфраструктурой. Примеры: `~/projects/my-infra` (с tilde), `../infra` (относительный, если sysadmin/ и infra/ — соседи), `/home/user/work/infra` (полный абсолютный). Папка должна существовать к моменту первой работы агента — но при первом запуске /sysadmin-init может ещё не существовать, скилл предложит её создать."
         }
       }
+    },
+    "vpn": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Подсистема VPN. Если enabled=true — на одном из серверов оператора установлена эталонная панель 3X-UI (через скилл /setup-vpn-panel) и/или настроен серверный прокси для программ. Поля заполняются автоматически скиллами VPN-блока при первой установке. Читается health-check / audit-security / Cold Start для контекста и проверок.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Включена ли VPN-подсистема. true — на одном из серверов (см. servers[]) развёрнута 3X-UI. false — не развёрнута. По умолчанию false при создании конфига; меняется на true при первом успешном запуске /setup-vpn-panel."
+        },
+        "panel_url": {
+          "type": ["string", "null"],
+          "description": "Полный URL панели в формате https://{domain}:{port} (БЕЗ webBasePath — он в отдельном поле). Заполняется скиллом /setup-vpn-panel автоматически. Читается /health-check и /audit-security для проверки доступности панели."
+        },
+        "panel_web_base_path": {
+          "type": ["string", "null"],
+          "description": "webBasePath панели (например, '/abc123xyz0/'). Случайный 10-символьный путь, защищающий от сканеров. Заполняется скиллом /setup-vpn-panel. Используется скиллами /configure-vpn-routing, /setup-server-proxy, /generate-client-config при API-вызовах."
+        },
+        "server_proxy_enabled": {
+          "type": "boolean",
+          "description": "Настроен ли серверный прокси (mixed inbound на 127.0.0.1:1080 + systemd-override для x-ui + /etc/environment с socks5h). true — программы на сервере (бот, npm, pip, curl) ходят в зарубежные API через VPN. Заполняется /setup-server-proxy."
+        },
+        "upstream_kind": {
+          "type": "string",
+          "enum": ["subscription", "self-foreign", "mixed", "none"],
+          "description": "Как организован upstream для outbound. subscription — подписка платного VPN-провайдера (рекомендация для оператора в РФ). self-foreign — свой заграничный VPS с VLESS+Reality (полный контроль). mixed — гибрид (свой VPS как основной + подписка как fallback через balancer). none — outbound не настроен. Заполняется /configure-vpn-routing."
+        },
+        "default_reality_dest": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Домен-донор по умолчанию для VLESS+Reality serverName, когда оператор устанавливает свой заграничный VPS (/setup-vpn-panel --location=foreign-server). Должен поддерживать TLS 1.3 + HTTP/2. Проверенные варианты: www.cloudflare.com (default), dl.google.com, www.microsoft.com, www.amazon.com."
+        }
+      }
     }
   },
   "allOf": [
@@ -295,6 +328,52 @@
               "telegram": {
                 "required": ["enabled", "bot_username", "chat_type"]
               }
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "Если vpn.enabled=true → обязательны panel_url и panel_web_base_path (записываются скиллом /setup-vpn-panel при установке).",
+      "if": {
+        "properties": {
+          "vpn": {
+            "properties": { "enabled": { "const": true } },
+            "required": ["enabled"]
+          }
+        },
+        "required": ["vpn"]
+      },
+      "then": {
+        "properties": {
+          "vpn": {
+            "required": ["enabled", "panel_url", "panel_web_base_path"],
+            "properties": {
+              "panel_url": { "type": "string", "minLength": 1 },
+              "panel_web_base_path": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "Если vpn.server_proxy_enabled=true → vpn.enabled должен быть true (нельзя настроить прокси без панели) и vpn.upstream_kind ≠ none (нужен upstream для маршрутизации).",
+      "if": {
+        "properties": {
+          "vpn": {
+            "properties": { "server_proxy_enabled": { "const": true } },
+            "required": ["server_proxy_enabled"]
+          }
+        },
+        "required": ["vpn"]
+      },
+      "then": {
+        "properties": {
+          "vpn": {
+            "required": ["enabled", "upstream_kind"],
+            "properties": {
+              "enabled": { "const": true },
+              "upstream_kind": { "enum": ["subscription", "self-foreign", "mixed"] }
             }
           }
         }
