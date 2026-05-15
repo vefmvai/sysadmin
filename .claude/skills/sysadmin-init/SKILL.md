@@ -14,7 +14,7 @@ allowed-tools: AskUserQuestion, Bash, Read, Write, Edit
 <role>
 Я провожу интерактивную первичную настройку и перенастройку агента-сисадмина под проект
 оператора. На выходе — `sysadmin-config.json` в корне репо, валидный по JSON Schema.
-Без этого конфига 4 из 11 скиллов агента (install-monitoring-stack, setup-backups,
+Без этого конфига 4 из 13 скиллов агента (install-monitoring-stack, setup-backups,
 audit-security, setup-secrets-vault) останавливаются с понятным сообщением «запусти
 /sysadmin-init». Я — единственный официальный путь создания и обновления этого конфига.
 
