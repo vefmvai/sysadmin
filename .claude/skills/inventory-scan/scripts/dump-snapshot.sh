@@ -26,7 +26,7 @@
 set -euo pipefail
 
 # SERVER — обязательный аргумент. Без него — fail-fast с подсказкой,
-# чтобы ученик случайно не пошёл на чужой сервер.
+# чтобы оператор случайно не пошёл на чужой сервер.
 if [ "$#" -lt 1 ]; then
     echo "ERROR: SERVER не задан." >&2
     echo "Использование: bash dump-snapshot.sh <SERVER> [DATE] [INVENTORY_DIR]" >&2
