@@ -73,13 +73,49 @@ self-loop, на котором ломается панель 3X-UI без пра
 
 # Процедура
 
-## Шаг 0: Pre-check (Green Zone)
+## Шаг 0: Pre-check (Green Zone) — детекция существующей установки
+
+**Запускаю `scripts/00-detect-existing.sh` ПЕРВЫМ.** Скрипт проверяет 4
+индикатора на сервере:
+
+- A: `/etc/systemd/system/x-ui.service.d/override.conf` существует с
+  `HTTP_PROXY=""`.
+- B: `/etc/environment` содержит строки `https_proxy=socks5h://...`.
+- C: На панели есть mixed-inbound на 127.0.0.1:1080 (через API или SQLite).
+- D: `curl -x socks5h://127.0.0.1:1080 https://www.google.com` отвечает HTTP.
+
+Решение по результату:
+
+- **`ALREADY_INSTALLED` (все 4 TRUE)** → серверный прокси уже настроен и
+  работает. STOP. Сообщаю оператору:
+  > «Серверный прокси уже работает (127.0.0.1:$PROXY_PORT). Я ничего не
+  > трогаю. Если конкретная программа не идёт через прокси (бот, aiohttp,
+  > anthropic SDK) — это **troubleshooting библиотеки**, не установки.
+  > Скорее всего нужно `trust_env=True` (aiohttp) или явный httpx-клиент
+  > (anthropic SDK issue #923 / openai SDK). Подробнее — `.claude/skills/
+  > setup-server-proxy/references/python-libs-with-proxy.md`. Хочешь
+  > пройти по конкретному кейсу — скажи, какая библиотека и что показывает
+  > трассировка.»
+
+- **`PARTIAL` с `recommendation=troubleshoot`** (override и /etc/environment
+  есть, но curl не работает) → проблема в текущей установке. Спрашиваю
+  оператора: «прокси настроен, но не работает. Это либо upstream-сервер
+  лёг, либо панель упала. Запустить `/health-check` для диагностики, или
+  предпочитаешь полный rollback и переустановку?»
+
+- **`PARTIAL` с `recommendation=resume`** (часть индикаторов TRUE — например,
+  override есть, но inbound не создан) → прерванная сессия. Предлагаю
+  оператору: «нашёл частичную установку. Продолжить с того места, где
+  остановились, или откатить и поставить заново?»
+
+- **`NOT_INSTALLED` (все 4 FALSE)** → чистая установка. Продолжаю обычным flow.
+
+Дополнительные проверки (выполняются только при `recommendation=install` или
+`resume`):
 
 - Панель отвечает: `curl -sI https://$PANEL_DOMAIN:$PANEL_PORT/$WEB_BASE_PATH/` → 200.
 - В `vpn.upstream_kind` в config ≠ `none` (иначе нет outbound — некуда маршрутизировать).
 - SSH-доступ работает.
-- Если `vpn.server_proxy_enabled=true` — спрашиваем оператора: «уже настроено,
-  переконфигурировать?» (idempotent re-run).
 
 ## Шаг 1: Брифинг 6 пунктов (Yellow Zone) с критическим предупреждением
 
