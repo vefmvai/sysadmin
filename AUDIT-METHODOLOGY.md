@@ -45,6 +45,58 @@
 
 ---
 
+## VPN-сессия 2026-05-15: завершено
+
+Выделенная сессия, отложенная из сессии рефакторинга. Прочитаны полностью 4 рисёрча
+в `.planning/` (2781 строка) — без выжимок, по правилу `project-vpn-dedicated-session`.
+
+| Артефакт | Статус |
+|---|---|
+| 4 knowledge-документа в `.claude/knowledge/networking/` (vpn-protocols, 3x-ui-panel, 3x-ui-api, client-apps) | ✅ закрыто (2271 строка суммарно с frontmatter и источниками) |
+| ADR-0005 «Архитектура VPN-блока» | ✅ закрыто |
+| `/setup-vpn-panel` (установка 3X-UI с TLS, поддержка ru-server и foreign-server) | ✅ закрыто |
+| `/configure-vpn-routing` (inbound/outbound/balancer/clients, два пути outbound) | ✅ закрыто |
+| `/setup-server-proxy` (mixed inbound + systemd-override + socks5h + smoke-test) | ✅ закрыто |
+| `/generate-client-config` (vless+sing-box JSON+QR, стратегия совместимости 1.11) | ✅ закрыто (4-й скилл вне исходного ТЗ, по согласованию) |
+| `scripts/lib-api/3xui.sh` — shared helper REST API панели | ✅ закрыто |
+| Расширение персоны: 3 якоря Character (WG/OVPN, self-loop, iOS), презумпция блокировок РФ-2026, обновлённые indexes 8.1 / 8.3 | ✅ закрыто |
+| Секция `vpn` в sysadmin-config.schema.json + example.json (+ условная валидация) | ✅ закрыто |
+| sysadmin-init: Шаг 7.5 — Раунд 6.5 VPN | ✅ закрыто |
+| README + sysadmin-meet (13 → 17 скиллов, новая группа «Сеть и обход блокировок») | ✅ закрыто |
+
+**Всего скиллов в репо:** 13 → 17.
+**Всего knowledge-документов:** 0 → 4 (домен `networking/`).
+**Всего ADR:** 4 → 5.
+
+Архитектурная позиция (зафиксирована в ADR-0005):
+- Сервер = Xray через эталонную 3X-UI (форки отказываются, явное сообщение).
+- Серверный inbound: ru-server → VLESS-TCP без Reality; foreign-server → VLESS+Reality.
+- Outbound — **два равноправных пути** (по коррекции Василия): subscription и self-foreign.
+- Клиент = sing-box через Hiddify/Karing/SFA + xray-клиенты как fallback.
+- iOS-стратегия: нижняя планка sing-box 1.11.x.
+- Защита от self-loop: systemd-override для x-ui первым шагом /setup-server-proxy.
+- API-first: REST через curl, SQLite — fallback, UI — аварийный.
+
+Особенности процесса:
+- 4 рисёрча в `.planning/` прочитаны полностью (без читалки выводов / TL;DR).
+- 4 согласующих вопроса в начале сессии (тип скиллов, атомарность, имена,
+  конфиг) + 2 коррекции по ходу (равноправие путей A/B; универсальность языка
+  без отсылок к учебным контекстам).
+- В каждом скилле — evals/triggers.md с минимум 11 positive + 7-10 negative +
+  4-6 edge-cases, проверены на пересечения с соседними скиллами.
+- Все shell-скрипты прошли `bash -n` + `shellcheck` без ошибок (только info-warnings
+  с обоснованными `# shellcheck disable=...`).
+- `parse-vless-link.sh` функционально протестирован — поймал bug с glob-pattern
+  `?` в parameter expansion (нужно экранирование `\?` чтобы не съедало первый
+  символ query).
+- JSON Schema валидирована через `check-jsonschema`. 3 condition-теста:
+  positive, vpn.enabled=true без panel_url, vpn.server_proxy_enabled без vpn.enabled.
+
+Дополнительные артефакты:
+- 4 рисёрча в `.planning/` оставлены (источник для будущих ревизий и обновлений).
+
+---
+
 ## 1. Краткое резюме
 
 Агент `sysadmin` — это **архитектурно зрелая конструкция** для своей задачи: один проектный subagent с продуманной конституцией + 13 проектных скиллов, разделённых по доменам инфраструктурных задач. Видна сознательная работа с тремя зонами доверия, защитой от prompt-инъекций, ритуалом памяти. Это не «обёртка-промпт», а полноценный operating model для конкретной роли. Сильнее всего канон Anthropic соблюдён в **архитектуре прогрессивного раскрытия скиллов** (каждый ≤ 600 строк, детали в `references/` и `scripts/`) и в **трёхуровневой политике полномочий**, которая прямо реализует совет из методички 08 §6 про «балансирование автономии и безопасности».
