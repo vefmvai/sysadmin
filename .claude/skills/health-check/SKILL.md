@@ -1,19 +1,13 @@
 ---
 name: health-check
 description: |
-  Быстрая read-only диагностика здоровья сервера и сервисов: docker ps, ресурсы (CPU/RAM/Disk),
-  HTTP-эндпоинты, статус контейнеров (healthy/unhealthy/restarting), свежесть бэкапа, валидность TLS.
-  Три режима: smoke (~10 сек, базовый набор), full (~1 мин, плюс детальные проверки), specific
-  (фокус на одном сервисе). Output structured (JSON для парсинга) и human-readable (для оператора).
-  Используй когда оператор пишет: «проверь как сервер», «health check», «smoke test», «что там работает»,
-  «всё ли ок», «diagnostic», «как там <сервис>», «жив ли <сервис>», «утренняя проверка».
-when_to_use: |
-  - Плановый утренний обход (см. регламент жизни в персоне @sysadmin).
-  - При подозрении на проблему — до того как лезть в логи и менять состояние.
-  - После деплоя как verification (smoke + specific по выкаченному сервису).
-  - При расследовании алерта — для быстрого среза «что красное прямо сейчас».
-  Скилл полностью read-only (Green Zone) — безопасно запускать всегда, без брифинга.
-disable-model-invocation: false
+  Read-only диагностика здоровья сервера: docker ps, CPU/RAM/Disk, HTTP-эндпоинты, статус
+  контейнеров (healthy/unhealthy/restarting), свежесть бэкапа, TLS-валидность. Три режима:
+  smoke (~10 сек), full (~1 мин), specific (один сервис). Output: JSON + human-readable.
+  Green Zone, без брифинга.
+  Триггеры: «проверь сервер», «health check», «smoke test», «всё ли ок», «жив ли сервис»,
+  «утренняя проверка», «diagnostic», «как там сервер».
+  НЕ для изменений (это deploy-service / другие скиллы); НЕ для детального аудита (audit-security).
 allowed-tools: Bash, Read
 ---
 

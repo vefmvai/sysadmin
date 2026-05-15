@@ -1,21 +1,13 @@
 ---
 name: setup-backups
 description: |
-  Настройка бэкапов сервера с нуля: restic для encrypted snapshots, offsite-хранилище
-  (S3-совместимое / Backblaze B2 / WebDAV — Яндекс.Диск, NextCloud, ownCloud — параметром),
-  retention 7+4+6 (daily+weekly+monthly), алерт «бэкап старше 36 часов» в канал
-  оператора (Telegram / Slack / email — берётся из inventory/access.md), фактический
-  прогон restore на временный контейнер. Покрывает БД (PostgreSQL, MySQL, Redis dump).
-  Используй когда оператор говорит "нужны бэкапы", "настрой backup",
-  "restic с retention", "offsite на S3 / WebDAV / Backblaze",
-  "без бэкапов нельзя ничего менять".
-when_to_use: |
-  Перед любыми деструктивными изменениями на сервере. Покрывает только БД (uploads —
-  отдельный шаблон, не входит в скилл). Требует уже настроенного хранилища (S3 bucket /
-  B2 bucket / WebDAV-endpoint — например, Яндекс.Диск, NextCloud) с известными
-  credentials и настроенного канала алертов (Telegram-бот / Slack webhook / email —
-  опционально, но рекомендуется для алертов о возрасте бэкапа).
-disable-model-invocation: false
+  Бэкапы с нуля: restic для encrypted snapshots, offsite-хранилище (S3 / B2 / WebDAV —
+  Яндекс.Диск, NextCloud), retention 7+4+6 (daily+weekly+monthly), алерт «бэкап >36 ч»
+  в Telegram/Slack/email, обязательный прогон restore на временный контейнер.
+  Покрывает БД (PostgreSQL, MySQL, Redis dump).
+  Триггеры: «нужны бэкапы», «настрой backup», «restic с retention», «offsite на S3/WebDAV/Backblaze»,
+  «без бэкапов нельзя ничего менять».
+  НЕ для бэкапа uploads/файлов (это отдельный шаблон); НЕ для setup без настроенного хранилища.
 allowed-tools: Bash, Read, Edit, Write
 ---
 

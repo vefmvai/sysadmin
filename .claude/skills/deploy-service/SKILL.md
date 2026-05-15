@@ -1,21 +1,12 @@
 ---
 name: deploy-service
 description: |
-  Деплой нового сервиса или обновление существующего по паттерну push-to-pull manual deploy
-  (мак → git push → SSH → git pull --ff-only → селективный docker compose up -d). Pre-check
-  блокирующий: inventory свежий, бэкап ≤24ч, домен резолвится в IP сервера, working tree чистый.
-  Decision tree: новый сервис vs обновление существующего. Yellow Zone — каждый деплой через
-  брифинг 6 пунктов и type-to-confirm. Rollback к предыдущему git ref за <5 мин.
-  Используй когда оператор пишет: «задеплой <сервис>», «новый сервис», «обнови <сервис>»,
-  «deploy», «выкатить», «поднять <сервис>», «накатить версию», «откати <сервис>».
-when_to_use: |
-  - Добавление нового инфраструктурного сервиса (compose в /opt/infra/services/<name>/).
-  - Обновление существующего инфраструктурного сервиса (новый image tag, изменения в compose).
-  - Откат после неудачного деплоя (`MODE=rollback`).
-  Yellow Zone — обязательный брифинг + подтверждение. НЕ для деплоя в обход git
-  (это аварийный режим, отдельный runbook). НЕ для деструктивных операций — это Red Zone
-  (drop volume, drop database — отдельная процедура).
-disable-model-invocation: false
+  Деплой/обновление/откат инфраструктурного сервиса по паттерну push-to-pull (мак → git push →
+  SSH → git pull --ff-only → docker compose up -d). Блокирующий pre-check: inventory свежий,
+  бэкап ≤24ч, домен резолвится, working tree чистый. Yellow Zone, брифинг + type-to-confirm,
+  rollback <5 мин. MODE: new | update | rollback.
+  Триггеры: «задеплой», «новый сервис», «обнови сервис», «deploy», «выкатить», «накатить версию», «откати».
+  НЕ для деплоя в обход git (аварийный runbook); НЕ для drop volume/database (Red Zone).
 allowed-tools: Bash, Read, Edit, Write
 ---
 

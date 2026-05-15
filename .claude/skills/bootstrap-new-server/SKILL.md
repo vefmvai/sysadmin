@@ -1,17 +1,13 @@
 ---
 name: bootstrap-new-server
 description: |
-  Полная первичная настройка свежего VPS (Ubuntu 22.04+/Debian 12+) по индустриальным стандартам:
-  SSH-ключи и отключение root-логина, UFW (deny-in default + allow 22/80/443), fail2ban,
-  установка Docker + docker-compose, базовая структура /opt/, инициализация git с .gitignore
-  и pre-commit hook gitleaks, шаблоны ADR/runbook/incident. Работает только на свежих VPS.
-  Используй когда оператор говорит «настрой новый сервер с нуля», «получил VPS — нужно поднять»,
-  «как у тебя на проде, только мне», «свежий ubuntu», «bootstrap server», «поднять чистый сервер».
-when_to_use: |
-  Только для свежих VPS, где нет конфликтов с существующими настройками.
-  НЕ для приведения в порядок существующего хаоса (для этого — `cleanup-existing-server`).
-  После выполнения — рекомендуется сразу запустить `setup-secrets-vault`.
-disable-model-invocation: false
+  Первичная настройка свежего VPS (Ubuntu 22.04+/Debian 12+): SSH-ключи, отключение root-логина,
+  UFW (deny-in + 22/80/443), fail2ban, Docker + compose, структура /opt/, git с gitleaks
+  pre-commit hook, шаблоны ADR/runbook/incident. Только свежие VPS.
+  Триггеры: «настрой новый сервер», «получил VPS», «свежий ubuntu», «bootstrap server»,
+  «поднять чистый сервер», «как у тебя на проде, только мне».
+  НЕ для приведения хаоса в порядок (для этого — cleanup-existing-server); НЕ для серверов
+  с существующими Docker/nginx/configs — это другой жанр.
 allowed-tools: Bash, Read, Edit, Write
 ---
 

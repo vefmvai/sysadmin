@@ -1,22 +1,13 @@
 ---
 name: migrate-server-to-server
 description: |
-  Перенос Docker-инфраструктуры со старого VPS на новый. 4 стратегии: live (logical
-  replication PostgreSQL + RDB/AOF Redis, downtime 30-120 сек), backup-restore
-  (pg_dumpall + tar volumes + scp, downtime 10-60 мин), rsync-incremental (день 1+2+3
-  с финальным delta, downtime 5-15 мин), blue-green (параллельные серверы со
-  switching через nginx/LB, downtime 0, но 2x cost). Pre-migration checklist
-  (inventory + размеры + зависимости + backup), cutover (DNS + final rsync),
-  post-migration verify (row counts + healthchecks). Rollback сценарий явный —
-  возврат на старый VPS за минуты.
-  Используй когда оператор говорит "переезд на новый сервер", "migrate server",
-  "сменить VPS", "переместить инфру", "новый провайдер", "сменить хостинг".
-when_to_use: |
-  При смене VPS-провайдера, апгрейде ресурсов сервера, переезде на bare-metal.
-  Требует параллельный доступ к старому и новому серверу. Длительность зависит от
-  стратегии: 1-3 часа (rsync для маленьких) — недели (blue-green с долгим warmup).
-  Перед запуском новый сервер должен быть bootstraped — см. скилл `bootstrap-new-server`.
-disable-model-invocation: false
+  Перенос Docker-инфраструктуры со старого VPS на новый. 4 стратегии по downtime/cost:
+  live (logical replication, 30-120 сек), backup-restore (10-60 мин), rsync-incremental
+  (5-15 мин), blue-green (0 downtime, 2x cost). Pre-checklist + cutover (DNS) + verify
+  (row counts, healthchecks). Rollback явный.
+  Триггеры: «переезд на новый сервер», «migrate server», «сменить VPS», «переместить инфру»,
+  «новый провайдер», «сменить хостинг».
+  НЕ для bootstrap (это bootstrap-new-server); НЕ для приведения хаоса в порядок (cleanup-existing-server).
 allowed-tools: Bash, Read, Edit, Write
 ---
 

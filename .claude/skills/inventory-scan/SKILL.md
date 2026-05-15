@@ -1,21 +1,13 @@
 ---
 name: inventory-scan
 description: |
-  Полная инвентаризация сервера: запуск dump-snapshot.sh для сбора снимка реального
-  состояния (контейнеры, сети, volumes, БД, домены, cron, host-скрипты, nginx-конфиги,
-  TLS-сертификаты, systemd-юниты), затем генерация или обновление 8 inventory-документов
-  (services.md, networks.md, volumes.md, databases.md, domains.md, cron.md,
-  host-scripts.md, server.md). Сравнивает с существующим inventory и выделяет drift'ы.
-  Полностью read-only на сервере (Green Zone).
-  Используй когда оператор говорит «сделай инвентаризацию», «снять снимок сервера»,
-  «что у меня на сервере», «обновить inventory», «scan server», «inventory drift»,
-  «свежий снимок», «refresh inventory».
-when_to_use: |
-  Запускай при первом подключении к серверу, после крупных изменений (новые сервисы,
-  смена сетей, миграция volume), плановое обновление раз в месяц, или когда нужно
-  сверить документацию с реальностью. Read-only — безопасно запускать в любой момент,
-  ничего не ломает. Параметризуется через SSH_HOST и INVENTORY_DIR.
-disable-model-invocation: false
+  Read-only инвентаризация сервера: dump-snapshot.sh → 8 документов в inventory/ (services,
+  networks, volumes, databases, domains, cron, host-scripts, server). Сравнение с прошлым
+  inventory с выделением drift'ов. Green Zone.
+  Триггеры: «инвентаризация», «снять снимок сервера», «что у меня на сервере», «обновить inventory»,
+  «scan server», «inventory drift», «refresh inventory».
+  НЕ для изменений на сервере (это cleanup-existing-server и др.); НЕ для аудита безопасности
+  (audit-security).
 allowed-tools: Bash, Read, Edit, Write
 ---
 

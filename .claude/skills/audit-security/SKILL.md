@@ -1,22 +1,12 @@
 ---
 name: audit-security
 description: |
-  Security-аудит сервера по чек-листу: UFW настроен (deny-in default + allow только
-  22/80/443), SSH-config (PasswordAuthentication no, PermitRootLogin no, или
-  prohibit-password), fail2ban active с jail для sshd, .env-файлы mode 0600, TLS
-  expiry для всех доменов, открытые порты только публичные (22/80/443) или 127.0.0.1,
-  нет секретов в git history (gitleaks scan), unattended-upgrades без auto-reboot,
-  Docker daemon без insecure-registries. Output: structured audit-report с категориями
-  PASS / WARN / FAIL и рекомендациями. Read-only — НЕ исправляет найденное
-  автоматически, только отчёт.
-  Используй когда оператор говорит "security audit", "проверь безопасность", "аудит
-  сервера", "all secure", "compliance check", "проверь хардеринг".
-when_to_use: |
-  Плановый — раз в квартал. Внеплановый — после security-инцидента, при подозрении
-  на компромент, перед публикацией нового сервиса наружу. Read-only (Green Zone).
-  НЕ исправляет найденное (для исправлений — отдельные скиллы или ручная работа
-  оператора по рекомендациям из отчёта).
-disable-model-invocation: false
+  Security-аудит сервера по чек-листу (UFW, SSH-config, fail2ban, .env-mode, TLS-expiry,
+  открытые порты, gitleaks, unattended-upgrades, Docker daemon). Output: structured отчёт
+  PASS / WARN / FAIL с рекомендациями. Read-only (Green Zone) — НЕ исправляет.
+  Триггеры: «security audit», «проверь безопасность», «аудит сервера», «compliance check»,
+  «проверь хардеринг», «audit hardening».
+  НЕ для исправлений (для них — отдельные скиллы); НЕ для penetration test (это другой жанр).
 allowed-tools: Bash, Read
 ---
 

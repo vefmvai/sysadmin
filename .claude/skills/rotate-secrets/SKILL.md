@@ -1,21 +1,12 @@
 ---
 name: rotate-secrets
 description: |
-  Плановая ротация секретов с обновлением индекса в inventory/access.md. Категории:
-  DB password (PostgreSQL/MySQL/Redis), API token (Telegram, GitHub, etc), SSH-key,
-  TLS-сертификат (через acme.sh), OAuth secret. Процедура: создать новый → атомарно
-  подменить во всех потребителях → verify работа → удалить старый. Yellow Zone —
-  каждая ротация требует подтверждения оператора. Записывает incident в
-  incidents/YYYY-MM-DD-rotate-<secret>.md.
-  Используй когда оператор говорит "ротировать секрет", "сменить пароль БД",
-  "rotate password", "плановая ротация", "secret expired", "compromise — ротировать",
-  "сменить токен", "обновить ключ".
-when_to_use: |
-  По расписанию (см. references/rotation-schedule.md): DB ежеквартально, API token
-  раз в 6 месяцев, SSH key ежегодно, TLS автоматически (Let's Encrypt 90 дней).
-  Внепланово — при подозрении на компрометацию или при увольнении сотрудника с
-  доступом. НЕ для первичной настройки секретов (для этого — `setup-secrets-vault`).
-disable-model-invocation: false
+  Плановая ротация секретов (DB-пароль, API-токен, SSH-ключ, TLS-cert, OAuth-secret) с обновлением
+  inventory/access.md. Процедура: новый → атомарная подмена → verify → удалить старый. Yellow Zone,
+  подтверждение + incident-запись в incidents/YYYY-MM-DD-rotate-<secret>.md.
+  Триггеры: «ротировать секрет», «сменить пароль БД», «rotate password», «плановая ротация»,
+  «secret expired», «compromise — ротировать», «сменить токен», «обновить ключ».
+  НЕ для первичной настройки секретов (setup-secrets-vault); НЕ для удаления секрета без замены.
 allowed-tools: Bash, Read, Edit, Write
 ---
 

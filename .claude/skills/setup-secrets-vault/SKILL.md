@@ -1,20 +1,13 @@
 ---
 name: setup-secrets-vault
 description: |
-  Настройка менеджера паролей для проекта без привязки к одному инструменту:
-  Keychain (macOS, default), pass (Linux/CLI), KeePassXC (cross-platform desktop), Bitwarden (online).
-  Спрашивает у оператора предпочтения, рекомендует подходящий вариант на основе ОС, устанавливает
-  выбранный, создаёт шаблон индекса кредов в `inventory/access.md`, объясняет принцип
-  «секреты вне репозитория с первого дня».
-  Используй когда оператор говорит «настрой менеджер паролей», «куда хранить секреты»,
-  «не хочу секреты в репе», «.env по правилам», «secrets vault», «password manager».
-when_to_use: |
-  В начале проекта (вместе или сразу после bootstrap-new-server) или при миграции
-  с .env-в-репе. Для оператора macOS рекомендация по умолчанию — Keychain
-  (встроен, не требует внешних сервисов). Bitwarden — допустимая альтернатива,
-  если оператор уже его использует и не готов мигрировать.
-  НЕ для миграции уже существующего корпоративного менеджера (1Password, LastPass).
-disable-model-invocation: false
+  Менеджер паролей для проекта: Keychain (macOS, default), pass (Linux/CLI), KeePassXC
+  (cross-platform), Bitwarden (online). Рекомендация по ОС, установка, шаблон индекса
+  в inventory/access.md. Принцип: секреты НИКОГДА в git, только указатели.
+  Триггеры: «настрой менеджер паролей», «куда хранить секреты», «не хочу секреты в репе»,
+  «.env по правилам», «secrets vault», «password manager».
+  НЕ для ротации существующих секретов (rotate-secrets); НЕ для миграции корпоративных
+  менеджеров (1Password, LastPass).
 allowed-tools: Bash, Read, Edit, Write
 ---
 

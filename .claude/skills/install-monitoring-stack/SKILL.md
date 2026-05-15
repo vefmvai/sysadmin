@@ -1,18 +1,12 @@
 ---
 name: install-monitoring-stack
 description: |
-  Установка опционального мониторинг-стека: Uptime Kuma (uptime-проверки) + Beszel (host
-  metrics + agent) + Dozzle (live-логи) + Dockge (compose UI) + Diun (image updates) +
-  Telegram-интеграция. Конфигурируется параметром COMPONENTS — можно поставить только Kuma,
-  можно весь стек. Все версии запинены (без latest), nginx vhost с Basic Auth + Let's
-  Encrypt, Kuma настраивается через socket.io API 2.x. Используй когда оператор говорит
-  "хочу как у тебя дашборд", "поставь мониторинг", "Uptime Kuma + Beszel", "нужны глаза
-  на сервер", "monitoring stack".
-when_to_use: |
-  Опционально. Базовая работа агента возможна без этого стека (см. метку [+ если есть стек]
-  в персоне). Требует уже настроенного домена (panel.<domain> резолвится в IP) и nginx как
-  reverse-proxy. Suммарный RAM-бюджет 200-350 МБ — не подходит для серверов с <2 ГБ RAM.
-disable-model-invocation: false
+  Опциональный мониторинг-стек: Uptime Kuma + Beszel + Dozzle + Dockge + Diun + Telegram.
+  Параметр COMPONENTS — можно только Kuma или весь набор. Все версии запинены (без latest),
+  nginx vhost с Basic Auth + Let's Encrypt, Kuma через socket.io API 2.x. RAM-бюджет 200-350 МБ.
+  Триггеры: «хочу дашборд», «поставь мониторинг», «Uptime Kuma + Beszel», «нужны глаза на сервер»,
+  «monitoring stack».
+  НЕ для серверов <2 ГБ RAM; НЕ для VPN-панели (для этого — отдельный скилл VPN-блока).
 allowed-tools: Bash, Read, Edit, Write
 ---
 
