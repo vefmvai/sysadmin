@@ -17,3 +17,7 @@ sysadmin-config.json
 
 # Claude Code служебные файлы
 .claude/scheduled_tasks.lock
+
+# Результаты прогона evals — артефакты сессии, не часть репо.
+# Раннер — scripts/run-evals.sh (см. ADR-0004).
+.eval-results/
