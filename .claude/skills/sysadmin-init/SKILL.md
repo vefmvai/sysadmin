@@ -74,13 +74,34 @@ allowed-tools: AskUserQuestion, Bash, Read, Write, Edit
 
 ## Шаг 0: Pre-check (5 секунд, без вопросов оператору)
 
+**Важно про путь к конфигу:** `sysadmin-config.json` живёт в приватной папке `infra/` оператора (не в `sysadmin/`). Алгоритм поиска — тот же что в Cold Start Protocol персоны (см. `references/cold-start.md`):
+
+1. `./sysadmin-config.json` в текущем cwd (если оператор работает прямо в `infra/`).
+2. `../infra/sysadmin-config.json` (если cwd = `sysadmin/`).
+3. Типичные пути: `~/infra/`, `~/work/infra/`, `~/projects/infra/`.
+4. Если не нашёл — спрашиваю оператора путь к `infra/` (это будет первый вопрос).
+
 ```bash
+# 0. Найти конфиг (или зафиксировать что его нет)
+CONFIG_PATH=""
+for candidate in \
+    "./sysadmin-config.json" \
+    "../infra/sysadmin-config.json" \
+    "$HOME/infra/sysadmin-config.json" \
+    "$HOME/work/infra/sysadmin-config.json" \
+    "$HOME/projects/infra/sysadmin-config.json"; do
+    if [ -f "$candidate" ]; then
+        CONFIG_PATH="$candidate"
+        break
+    fi
+done
+
 # 1. Конфиг уже есть?
-[ -f sysadmin-config.json ] && CONFIG_EXISTS=true || CONFIG_EXISTS=false
+[ -n "$CONFIG_PATH" ] && CONFIG_EXISTS=true || CONFIG_EXISTS=false
 
 # 2. Какой режим? Идемпотентный выход без правок.
 if [ "$CONFIG_EXISTS" = "true" ] && [ "$ARG" != "--reconfigure" ]; then
-    echo "Уже настроено: cat sysadmin-config.json (см. поля version/language/servers)."
+    echo "Уже настроено: cat \"$CONFIG_PATH\" (см. поля version/language/servers)."
     echo "Для перенастройки запусти /sysadmin-init --reconfigure"
     exit 0
 fi
@@ -98,13 +119,18 @@ bash .claude/skills/sysadmin-init/scripts/detect-defaults.sh > /tmp/sysadmin-def
 # Содержимое: { "ssh_aliases": [...], "os": "Darwin", "docker": true, "jq_version": "1.7", ... }
 ```
 
+**Если CONFIG_PATH пуст (первичный setup):**
+- В Раунде 1.5 (путь к infra/) — спрашиваю оператора куда положить будущий `infra/`.
+- На Шаге 10 (запись) — `CONFIG_PATH = "$INFRA_PATH/sysadmin-config.json"`, где `$INFRA_PATH` — ответ оператора из Раунда 1.5 с раскрытым tilde.
+- Если папка `$INFRA_PATH` не существует — сначала `mkdir -p "$INFRA_PATH"` (это безопасно, мы только создаём пустую папку под конфиг и будущий inventory).
+
 ## Шаг 1: Приветствие (3-4 строки, дружелюбно)
 
 > «Привет! Я помогу настроить агента под твой проект. Соберу базовый паспорт оператора:
 > язык общения, менеджер паролей, какой у тебя сервер, что включено из мониторинга и
-> бэкапов, куда слать алерты. Итог — файл `sysadmin-config.json` в корне репо. Это
-> займёт 3-5 минут. Если по какому-то вопросу не уверен — пиши «давай как ты советуешь»,
-> я подставлю разумные значения.»
+> бэкапов, куда слать алерты. Итог — файл `sysadmin-config.json` в твоей приватной папке
+> `infra/`. Это займёт 3-5 минут. Если по какому-то вопросу не уверен — пиши «давай как
+> ты советуешь», я подставлю разумные значения.»
 
 ## Шаг 2: Раунд 1 — Имя, язык, таймзона (простые вопросы, без обёртки)
 
@@ -325,11 +351,22 @@ cat /tmp/sysadmin-config-draft.json | jq '.'
 
 Если «Да»:
 ```bash
-# Backup существующего, если есть
-[ -f sysadmin-config.json ] && \
-    cp sysadmin-config.json "sysadmin-config.json.bak.$(date +%Y%m%d-%H%M%S)"
-mv /tmp/sysadmin-config-draft.json sysadmin-config.json
-echo "Готово. Конфиг записан в sysadmin-config.json."
+# При первичном setup: CONFIG_PATH вычисляется из ответа Раунда 1.5
+# (infrastructure.root_path) — пишем туда.
+if [ -z "$CONFIG_PATH" ]; then
+    INFRA_PATH=$(jq -r '.infrastructure.root_path' /tmp/sysadmin-config-draft.json)
+    # Раскрываю tilde без eval (безопасно в bash/zsh)
+    INFRA_PATH="${INFRA_PATH/#\~/$HOME}"
+    # Создаю папку если её нет
+    mkdir -p "$INFRA_PATH"
+    CONFIG_PATH="$INFRA_PATH/sysadmin-config.json"
+fi
+
+# Backup существующего, если есть (для --reconfigure)
+[ -f "$CONFIG_PATH" ] && \
+    cp "$CONFIG_PATH" "$CONFIG_PATH.bak.$(date +%Y%m%d-%H%M%S)"
+mv /tmp/sysadmin-config-draft.json "$CONFIG_PATH"
+echo "Готово. Конфиг записан: $CONFIG_PATH"
 ```
 
 Если «Вернуться» — перезапускаю нужный раунд, остальные ответы сохраняю.
@@ -358,10 +395,10 @@ echo "Готово. Конфиг записан в sysadmin-config.json."
 Действия по ответу:
 
 ```bash
-# Вариант 1: уже знаком → ставлю флаг true
+# Вариант 1: уже знаком → ставлю флаг true (использую $CONFIG_PATH из Шага 0/10)
 tmp=$(mktemp) && jq --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     '.meta.onboarding_completed = true | .meta.onboarding_completed_at = $ts' \
-    sysadmin-config.json > "$tmp" && mv "$tmp" sysadmin-config.json
+    "$CONFIG_PATH" > "$tmp" && mv "$tmp" "$CONFIG_PATH"
 echo "Понял, отметил знакомство пройденным. Агент не будет напоминать."
 
 # Вариант 2: позже → флаг остаётся false (он и так false из шаблона)
@@ -382,7 +419,7 @@ exit 0
 Вывожу адаптированный список скиллов в зависимости от ответов оператора:
 
 ```
-Создал sysadmin-config.json в корне репо. Что дальше — пошагово:
+Создал sysadmin-config.json в твоей папке infra/. Что дальше — пошагово:
 
 1. [Если inventory/hosts/ пуст] Запусти /bootstrap-new-server для базовой настройки
    SSH/UFW/fail2ban/Docker/git+gitleaks на сервере {server.alias}.
@@ -403,10 +440,10 @@ exit 0
 
 # Режим --reconfigure
 
-Псевдокод одного раунда:
+Псевдокод одного раунда (использую `$CONFIG_PATH` из Шага 0 — он гарантированно непустой для `--reconfigure`):
 
 ```bash
-current_value=$(jq -r '.secrets.manager' sysadmin-config.json)
+current_value=$(jq -r '.secrets.manager' "$CONFIG_PATH")
 echo "Сейчас: secrets.manager = $current_value"
 # AskUserQuestion: "Оставить как есть? [y=да / n=задать вопросы заново]"
 # если "n": запустить тот же раунд, что в первичном setup
