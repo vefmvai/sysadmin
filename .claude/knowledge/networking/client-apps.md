@@ -1,14 +1,15 @@
 ---
-last_verified: 2026-05-15
-verification_interval: 6_months
-sources:
+knowledge_domain: vpn
+last_researched: 2026-05-15
+ttl_days: 30
+sources_checked:
   - https://sing-box.sagernet.org/clients/
   - https://sing-box.sagernet.org/clients/apple/
   - https://sing-box.sagernet.org/clients/apple/features/
   - https://sing-box.sagernet.org/clients/android/
   - https://github.com/SagerNet/sing-box
   - https://github.com/SagerNet/sing-box/releases
-  - https://github.com/SagerNet/sing-box/issues/2024
+  - https://github.com/SagerNet/sing-box/issues
   - https://github.com/SagerNet/sing-box-for-android
   - https://apps.apple.com/us/app/sing-box-vt/id6673731168
   - https://apps.apple.com/us/app/hiddify-proxy-vpn/id6596777532
@@ -17,14 +18,12 @@ sources:
   - https://apps.apple.com/us/app/happ-proxy-utility/id6504287215
   - https://apps.apple.com/us/app/v2raytun/id6476628951
   - https://f-droid.org/packages/io.nekohasekai.sfa/
-  - https://github.com/hiddify/hiddify-app
-  - https://github.com/KaringX/karing
-  - https://github.com/MatsuriDayo/NekoBoxForAndroid
-  - https://github.com/2dust/v2rayNG
+  - https://github.com/hiddify/hiddify-app/releases
+  - https://github.com/KaringX/karing/releases
+  - https://github.com/MatsuriDayo/NekoBoxForAndroid/releases
+  - https://github.com/2dust/v2rayNG/releases
   - https://hiddify.com/app/URL-Scheme/
-  - https://techcrunch.com/2024/07/08/apple-removes-vpn-apps-at-request-of-russian-authorities-say-app-makers/
-  - https://www.theregister.com/2024/09/26/apple_vpn_russia/
-  - https://novayagazeta.eu/amp/articles/2026/03/31/apple-reveals-it-bowed-to-kremlin-pressure-to-remove-190-apps-from-russian-app-store-over-three-years-en-news
+  - https://ntc.party/c/blocking/
 ---
 
 # Клиентские приложения: карта на 2026-05-15

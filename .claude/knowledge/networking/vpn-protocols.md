@@ -1,23 +1,19 @@
 ---
-last_verified: 2026-05-15
-verification_interval: 6_months
-sources:
+knowledge_domain: vpn
+last_researched: 2026-05-15
+ttl_days: 30
+sources_checked:
   - https://github.com/XTLS/REALITY
   - https://github.com/XTLS/Xray-core
+  - https://github.com/XTLS/Xray-core/releases
   - https://xtls.github.io/en/config/
   - https://github.com/SagerNet/sing-box
   - https://sing-box.sagernet.org/configuration/
   - https://github.com/MHSanaei/3x-ui
-  - https://arxiv.org/html/2403.03998v1
-  - https://www.usenix.org/system/files/sec22-xue-diwen.pdf
-  - https://rks.global/en/research/vpn-and-human-rights/
-  - https://torrentfreak.com/russia-blocks-167-vpns-steps-up-openvpn-wireguard-disruption-231031/
+  - https://ntc.party/c/blocking/
+  - https://github.com/net4people/bbs/issues
   - https://hub.xeovo.com/posts/27-bypassing-russias-wireguard-block-meet-amneziawg
-  - https://github.com/net4people/bbs/issues/363
-  - https://www.hrw.org/report/2025/07/30/disrupted-throttled-and-blocked/state-censorship-control-and-increasing-isolation
   - https://blog.cloudflare.com/russian-internet-users-are-unable-to-access-the-open-internet/
-  - https://help.openai.com/en/articles/5347006-openai-api-supported-countries-and-territories
-  - https://www.medianama.com/2025/09/223-anthropic-service-policy-update-bans-ai-access-chinese-firms/
 ---
 
 # VPN-протоколы: карта и применимость

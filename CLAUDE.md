@@ -3,7 +3,7 @@
 ## Что это за проект
 
 Этот репозиторий — **готовый агент-сисадмин для Claude Code**. Содержит персону агента
-(`.claude/agents/sysadmin.md`), 17 скиллов (`.claude/skills/`), JSON Schema конфига
+(`.claude/agents/sysadmin.md`), 18 скиллов (`.claude/skills/`), JSON Schema конфига
 и публичный шаблон. Назначение — позволить вайбкодеру за 5 минут получить
 персонального агента под свою инфраструктуру.
 
@@ -81,7 +81,7 @@
 | Знакомство с агентом для нового пользователя (~20 мин) | `.claude/skills/sysadmin-meet/SKILL.md` (запуск: `/sysadmin-meet`) |
 | Как настроить агента под свой проект | `.claude/skills/sysadmin-init/SKILL.md` (запуск: `/sysadmin-init`) |
 | Персона агента (характер, регламенты, протоколы) | `.claude/agents/sysadmin.md` |
-| 17 скиллов агента (готовые процедуры) | `.claude/skills/` |
+| 18 скиллов агента (готовые процедуры) | `.claude/skills/` |
 | Шаблон конфига агента (публичный, обезличенный) | `sysadmin-config.example.json` |
 | Формальный контракт конфига | `sysadmin-config.schema.json` |
 | Личный конфиг (создаётся `/sysadmin-init`) | `sysadmin-config.json` (в `.gitignore`) |

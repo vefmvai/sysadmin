@@ -1,16 +1,15 @@
 ---
-last_verified: 2026-05-15
-verification_interval: 6_months
-sources:
+knowledge_domain: vpn
+last_researched: 2026-05-15
+ttl_days: 30
+sources_checked:
   - https://github.com/MHSanaei/3x-ui
-  - https://raw.githubusercontent.com/MHSanaei/3x-ui/master/install.sh
-  - https://github.com/MHSanaei/3x-ui/blob/main/x-ui.sh
-  - https://github.com/MHSanaei/3x-ui/blob/main/config/config.go
+  - https://github.com/MHSanaei/3x-ui/releases
+  - https://github.com/MHSanaei/3x-ui/issues
   - https://github.com/MHSanaei/3x-ui/wiki/Installation
   - https://github.com/MHSanaei/3x-ui/wiki/Configuration
   - https://github.com/MHSanaei/3x-ui/wiki/Common-questions-and-problems
   - https://github.com/MHSanaei/3x-ui/wiki/Advanced
-  - https://github.com/MHSanaei/3x-ui/issues
   - https://deepwiki.com/MHSanaei/3x-ui/2.3-ssl-certificate-management
   - https://deepwiki.com/MHSanaei/3x-ui/5.2-telegram-bot-integration
   - https://xtls.github.io/en/config/routing.html

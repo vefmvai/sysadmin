@@ -1,10 +1,12 @@
 ---
-last_verified: 2026-05-15
-verification_interval: 6_months
-sources:
+knowledge_domain: vpn
+last_researched: 2026-05-15
+ttl_days: 30
+sources_checked:
   - https://www.postman.com/hsanaei/3x-ui/documentation/q1l5l0u/3x-ui
   - https://github.com/MHSanaei/3x-ui
-  - https://github.com/MHSanaei/3x-ui/releases/tag/v3.0.1
+  - https://github.com/MHSanaei/3x-ui/releases
+  - https://github.com/MHSanaei/3x-ui/issues
   - https://github.com/iamhelitha/3xui-api-client
   - https://github.com/mehdikhody/3x-ui-js
   - https://packagist.org/packages/estaheri/3x-ui
