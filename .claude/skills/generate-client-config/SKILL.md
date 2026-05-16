@@ -70,6 +70,67 @@ allowed-tools: Bash, Read, Write
 
 # Процедура
 
+## Шаг 0a: Чтение конфига (STRICT)
+
+Скилл — STRICT-режим: без `sysadmin-config.json` он не запускается. Нужны
+`vpn.panel_url` и `vpn.panel_web_base_path`, чтобы знать, к какой панели
+обращаться за данными клиента, и `secrets.manager` для доступа к кредам.
+Эта проверка выполняется **до** Шага 0 (Pre-check qrencode/панели).
+
+```bash
+# Поиск sysadmin-config.json (живёт в infra/ оператора)
+# Алгоритм идентичен Cold Start Protocol персоны (references/cold-start.md)
+CONFIG=""
+for candidate in \
+    "${INFRA_DIR:-/dev/null}/sysadmin-config.json" \
+    "./sysadmin-config.json" \
+    "../infra/sysadmin-config.json" \
+    "$HOME/infra/sysadmin-config.json" \
+    "$HOME/work/infra/sysadmin-config.json" \
+    "$HOME/projects/infra/sysadmin-config.json"; do
+    [ -f "$candidate" ] && { CONFIG="$candidate"; break; }
+done
+
+# 1) Конфиг обязан быть
+if [ -z "$CONFIG" ]; then
+    cat <<'EOF' >&2
+sysadmin-config.json не найден ни в одном из стандартных мест:
+  ./, ../infra/, ~/infra/, ~/work/infra/, ~/projects/infra/
+  + переменная окружения $INFRA_DIR (если задана).
+
+Без него я не знаю, к какой панели подключаться и где взять креды
+для чтения данных клиента.
+Запусти /sysadmin-init для первичной настройки агента.
+EOF
+    exit 1
+fi
+
+# 2) vpn.panel_url + vpn.panel_web_base_path обязательны
+PANEL_URL=$(jq -r '.vpn.panel_url // empty' "$CONFIG")
+PANEL_WEB_BASE_PATH=$(jq -r '.vpn.panel_web_base_path // empty' "$CONFIG")
+if [ -z "$PANEL_URL" ] || [ -z "$PANEL_WEB_BASE_PATH" ]; then
+    cat <<EOF >&2
+В $CONFIG нет vpn.panel_url или vpn.panel_web_base_path.
+
+Это означает, что 3X-UI ещё не установлен через /setup-vpn-panel,
+а в нём нет клиентов, конфиги которых можно генерировать.
+
+Сначала: /setup-vpn-panel → /configure-vpn-routing (создаст клиентов).
+Затем возвращайся к /generate-client-config.
+EOF
+    exit 1
+fi
+
+# 3) Подстановка параметров (CLI override'ят config)
+PANEL_DOMAIN="${PANEL_DOMAIN:-$(echo "$PANEL_URL" | sed -E 's|https?://||; s|:.*$||')}"
+PANEL_PORT="${PANEL_PORT:-$(echo "$PANEL_URL" | sed -E 's|https?://[^:]+:||; s|/.*$||')}"
+WEB_BASE_PATH="${WEB_BASE_PATH:-$PANEL_WEB_BASE_PATH}"
+SECRETS_MANAGER=$(jq -r '.secrets.manager // "keychain"' "$CONFIG")
+REPORT_LANGUAGE=$(jq -r '.language // "ru"' "$CONFIG")
+```
+
+После успешного чтения переходим к Шагу 0 (локальные зависимости и панель).
+
 ## Шаг 0: Pre-check (Green Zone)
 
 - Локально установлен `qrencode` (если в `OUTPUT_FORMATS` есть `qr`).

@@ -73,6 +73,79 @@ self-loop, на котором ломается панель 3X-UI без пра
 
 # Процедура
 
+## Шаг 0a: Чтение конфига (STRICT)
+
+Скилл — STRICT-режим: без `sysadmin-config.json` он не запускается. Серверный
+прокси работает поверх существующей VPN-инфраструктуры — нужны `vpn.panel_url`,
+`vpn.panel_web_base_path` и `vpn.upstream_kind ≠ none`. Эта проверка
+выполняется **до** запуска `scripts/00-detect-existing.sh`.
+
+```bash
+# Поиск sysadmin-config.json (живёт в infra/ оператора)
+# Алгоритм идентичен Cold Start Protocol персоны (references/cold-start.md)
+CONFIG=""
+for candidate in \
+    "${INFRA_DIR:-/dev/null}/sysadmin-config.json" \
+    "./sysadmin-config.json" \
+    "../infra/sysadmin-config.json" \
+    "$HOME/infra/sysadmin-config.json" \
+    "$HOME/work/infra/sysadmin-config.json" \
+    "$HOME/projects/infra/sysadmin-config.json"; do
+    [ -f "$candidate" ] && { CONFIG="$candidate"; break; }
+done
+
+# 1) Конфиг обязан быть
+if [ -z "$CONFIG" ]; then
+    cat <<'EOF' >&2
+sysadmin-config.json не найден ни в одном из стандартных мест:
+  ./, ../infra/, ~/infra/, ~/work/infra/, ~/projects/infra/
+  + переменная окружения $INFRA_DIR (если задана).
+
+Без него я не знаю, к какой панели обращаться (panel_url) и через
+какой outbound маршрутизировать серверный прокси.
+Запусти /sysadmin-init для первичной настройки агента.
+EOF
+    exit 1
+fi
+
+# 2) vpn.panel_url + vpn.panel_web_base_path + upstream_kind ≠ none
+PANEL_URL=$(jq -r '.vpn.panel_url // empty' "$CONFIG")
+PANEL_WEB_BASE_PATH=$(jq -r '.vpn.panel_web_base_path // empty' "$CONFIG")
+UPSTREAM_KIND=$(jq -r '.vpn.upstream_kind // "none"' "$CONFIG")
+
+if [ -z "$PANEL_URL" ] || [ -z "$PANEL_WEB_BASE_PATH" ]; then
+    cat <<EOF >&2
+В $CONFIG нет vpn.panel_url или vpn.panel_web_base_path.
+
+Это означает, что 3X-UI ещё не установлен через /setup-vpn-panel.
+Серверный прокси работает поверх установленной панели — сначала её нужно
+поднять. Запусти /setup-vpn-panel, потом /configure-vpn-routing для
+upstream-outbound, затем возвращайся к /setup-server-proxy.
+EOF
+    exit 1
+fi
+
+if [ "$UPSTREAM_KIND" = "none" ] || [ -z "$UPSTREAM_KIND" ]; then
+    cat <<EOF >&2
+В $CONFIG vpn.upstream_kind=none — нет настроенного upstream-outbound,
+через который серверный прокси будет ходить к заблокированным API.
+
+Сначала запусти /configure-vpn-routing для настройки outbound
+(subscription или self-foreign), затем возвращайся к /setup-server-proxy.
+EOF
+    exit 1
+fi
+
+# 3) Подстановка параметров (CLI override'ят config)
+PANEL_DOMAIN="${PANEL_DOMAIN:-$(echo "$PANEL_URL" | sed -E 's|https?://||; s|:.*$||')}"
+PANEL_PORT="${PANEL_PORT:-$(echo "$PANEL_URL" | sed -E 's|https?://[^:]+:||; s|/.*$||')}"
+WEB_BASE_PATH="${WEB_BASE_PATH:-$PANEL_WEB_BASE_PATH}"
+SECRETS_MANAGER=$(jq -r '.secrets.manager // "keychain"' "$CONFIG")
+REPORT_LANGUAGE=$(jq -r '.language // "ru"' "$CONFIG")
+```
+
+После успешного чтения переходим к Шагу 0 (детекция существующей установки).
+
 ## Шаг 0: Pre-check (Green Zone) — детекция существующей установки
 
 **Запускаю `scripts/00-detect-existing.sh` ПЕРВЫМ.** Скрипт проверяет 4

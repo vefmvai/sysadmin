@@ -73,6 +73,63 @@ allowed-tools: Bash, Read, Edit, Write
 
 # Процедура
 
+## Шаг 0a: Чтение конфига (STRICT)
+
+Скилл — STRICT-режим: без `sysadmin-config.json` он не запускается. Конфиг
+содержит `secrets.manager` (куда записать креды панели) и серверы — без них
+скилл угадывал бы намерения. Эта проверка выполняется **до** запуска
+`scripts/01-preflight.sh`, чтобы при отсутствии конфига оператор получил
+понятную ошибку, а не падение на середине процедуры.
+
+```bash
+# Поиск sysadmin-config.json (живёт в infra/ оператора)
+# Алгоритм идентичен Cold Start Protocol персоны (references/cold-start.md)
+CONFIG=""
+for candidate in \
+    "${INFRA_DIR:-/dev/null}/sysadmin-config.json" \
+    "./sysadmin-config.json" \
+    "../infra/sysadmin-config.json" \
+    "$HOME/infra/sysadmin-config.json" \
+    "$HOME/work/infra/sysadmin-config.json" \
+    "$HOME/projects/infra/sysadmin-config.json"; do
+    [ -f "$candidate" ] && { CONFIG="$candidate"; break; }
+done
+
+# 1) Конфиг обязан быть
+if [ -z "$CONFIG" ]; then
+    cat <<'EOF' >&2
+sysadmin-config.json не найден ни в одном из стандартных мест:
+  ./, ../infra/, ~/infra/, ~/work/infra/, ~/projects/infra/
+  + переменная окружения $INFRA_DIR (если задана).
+
+Без него я не знаю, в каком менеджере паролей сохранять креды панели
+3X-UI (логин/пароль/URL).
+Запусти /sysadmin-init для первичной настройки агента — это 3-5 минут вопросов,
+после которых этот скилл будет знать всё необходимое.
+EOF
+    exit 1
+fi
+
+# 2) secrets.manager должен быть задан
+SECRETS_MANAGER=$(jq -r '.secrets.manager // empty' "$CONFIG")
+if [ -z "$SECRETS_MANAGER" ] || [ "$SECRETS_MANAGER" = "null" ]; then
+    cat <<EOF >&2
+В $CONFIG нет поля secrets.manager — не знаю, куда сохранять креды панели
+3X-UI (логин/пароль/URL).
+
+Запусти /sysadmin-init --reconfigure и укажи менеджер паролей
+(keychain / pass / bw / op).
+EOF
+    exit 1
+fi
+
+# 3) Чтение серверного контекста (для inventory)
+SERVER_ALIAS_FROM_CONFIG=$(jq -r '.servers[0].alias // empty' "$CONFIG")
+REPORT_LANGUAGE=$(jq -r '.language // "ru"' "$CONFIG")
+```
+
+После успешного чтения переходим к Шагу 0 (Pre-check на сервере).
+
 ## Шаг 0: Pre-check (Green Zone)
 
 Скрипт `scripts/01-preflight.sh` запускается **до брифинга** — это безопасная
