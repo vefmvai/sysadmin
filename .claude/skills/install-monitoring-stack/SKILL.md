@@ -46,12 +46,25 @@ allowed-tools: Bash, Read, Edit, Write
 Скилл — STRICT-режим: без `sysadmin-config.json` он не запускается. Конфиг определяет, что именно ставить (стек, домен, Telegram), и явно фиксирует «оператор хочет мониторинг». Без этого решения скилл угадывал бы намерения — это запрещено правилами агента.
 
 ```bash
-CONFIG="${INFRA_DIR:-$(pwd)}/sysadmin-config.json"
+# Поиск sysadmin-config.json (живёт в infra/ оператора)
+# Алгоритм идентичен Cold Start Protocol персоны (references/cold-start.md)
+CONFIG=""
+for candidate in \
+    "${INFRA_DIR:-/dev/null}/sysadmin-config.json" \
+    "./sysadmin-config.json" \
+    "../infra/sysadmin-config.json" \
+    "$HOME/infra/sysadmin-config.json" \
+    "$HOME/work/infra/sysadmin-config.json" \
+    "$HOME/projects/infra/sysadmin-config.json"; do
+    [ -f "$candidate" ] && { CONFIG="$candidate"; break; }
+done
 
 # 1) Конфиг обязан быть
-if [ ! -f "$CONFIG" ]; then
+if [ -z "$CONFIG" ]; then
     cat <<'EOF' >&2
-sysadmin-config.json не найден.
+sysadmin-config.json не найден ни в одном из стандартных мест:
+  ./, ../infra/, ~/infra/, ~/work/infra/, ~/projects/infra/
+  + переменная окружения $INFRA_DIR (если задана).
 
 Без него я не знаю, какой стек разворачивать, на каком поддомене и куда слать алерты.
 Запусти /sysadmin-init для первичной настройки агента — это 3-5 минут вопросов,

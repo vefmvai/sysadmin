@@ -49,12 +49,25 @@ allowed-tools: Bash, Read, Edit, Write
 Скилл — STRICT-режим: без `sysadmin-config.json` он не запускается. Конфиг определяет, куда складываются бэкапы (S3 / B2 / WebDAV), какая retention, нужны ли Telegram-алерты и в каком менеджере паролей искать `restic`-passphrase. Без этих решений скилл угадывал бы намерения — это запрещено правилами агента.
 
 ```bash
-CONFIG="${INFRA_DIR:-$(pwd)}/sysadmin-config.json"
+# Поиск sysadmin-config.json (живёт в infra/ оператора)
+# Алгоритм идентичен Cold Start Protocol персоны (references/cold-start.md)
+CONFIG=""
+for candidate in \
+    "${INFRA_DIR:-/dev/null}/sysadmin-config.json" \
+    "./sysadmin-config.json" \
+    "../infra/sysadmin-config.json" \
+    "$HOME/infra/sysadmin-config.json" \
+    "$HOME/work/infra/sysadmin-config.json" \
+    "$HOME/projects/infra/sysadmin-config.json"; do
+    [ -f "$candidate" ] && { CONFIG="$candidate"; break; }
+done
 
 # 1) Конфиг обязан быть
-if [ ! -f "$CONFIG" ]; then
+if [ -z "$CONFIG" ]; then
     cat <<'EOF' >&2
-sysadmin-config.json не найден.
+sysadmin-config.json не найден ни в одном из стандартных мест:
+  ./, ../infra/, ~/infra/, ~/work/infra/, ~/projects/infra/
+  + переменная окружения $INFRA_DIR (если задана).
 
 Без него я не знаю, куда заливать бэкапы и в каком менеджере паролей лежит passphrase.
 Запусти /sysadmin-init для первичной настройки агента — это 3-5 минут вопросов,

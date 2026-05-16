@@ -51,9 +51,20 @@ allowed-tools: Bash, Read
 - `servers[0].ssh_alias` → значение `SERVER`, если CLI не задан.
 
 ```bash
-CONFIG="${INFRA_DIR:-$(pwd)}/sysadmin-config.json"
+# Поиск sysadmin-config.json (живёт в infra/ оператора)
+# Алгоритм идентичен Cold Start Protocol персоны (references/cold-start.md)
+CONFIG=""
+for candidate in \
+    "${INFRA_DIR:-/dev/null}/sysadmin-config.json" \
+    "./sysadmin-config.json" \
+    "../infra/sysadmin-config.json" \
+    "$HOME/infra/sysadmin-config.json" \
+    "$HOME/work/infra/sysadmin-config.json" \
+    "$HOME/projects/infra/sysadmin-config.json"; do
+    [ -f "$candidate" ] && { CONFIG="$candidate"; break; }
+done
 
-if [ -f "$CONFIG" ]; then
+if [ -n "$CONFIG" ]; then
     REPORT_LANGUAGE_FROM_CONFIG=$(jq -r '.language // "ru"' "$CONFIG")
     SERVER_FROM_CONFIG=$(jq -r '.servers[0].ssh_alias // empty' "$CONFIG")
     SECRETS_MANAGER_FROM_CONFIG=$(jq -r '.secrets.manager // empty' "$CONFIG")
@@ -61,8 +72,8 @@ else
     REPORT_LANGUAGE_FROM_CONFIG="ru"
     SERVER_FROM_CONFIG=""
     SECRETS_MANAGER_FROM_CONFIG=""
-    echo "WARN: sysadmin-config.json не найден. Использую defaults (язык=ru)." >&2
-    echo "      Для точности — запусти /sysadmin-init и заполни конфиг." >&2
+    echo "WARN: sysadmin-config.json не найден ни в одном из стандартных мест." >&2
+    echo "      Использую defaults (язык=ru). Для точности — запусти /sysadmin-init." >&2
 fi
 
 # CLI-override > конфиг

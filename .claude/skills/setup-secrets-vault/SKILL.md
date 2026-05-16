@@ -78,10 +78,21 @@ esac
 Скилл — OPTIONAL-режим. Может вызываться **до** `/sysadmin-init` (на свежем сервере, в составе bootstrap-сценария), поэтому отсутствие конфига — нормально.
 
 ```bash
-CONFIG="${INFRA_DIR:-$(pwd)}/sysadmin-config.json"
-VAULT_FROM_CONFIG=""
+# Поиск sysadmin-config.json (живёт в infra/ оператора)
+# Алгоритм идентичен Cold Start Protocol персоны (references/cold-start.md)
+CONFIG=""
+for candidate in \
+    "${INFRA_DIR:-/dev/null}/sysadmin-config.json" \
+    "./sysadmin-config.json" \
+    "../infra/sysadmin-config.json" \
+    "$HOME/infra/sysadmin-config.json" \
+    "$HOME/work/infra/sysadmin-config.json" \
+    "$HOME/projects/infra/sysadmin-config.json"; do
+    [ -f "$candidate" ] && { CONFIG="$candidate"; break; }
+done
 
-if [ -f "$CONFIG" ] && [ "${FORCE:-0}" != "1" ]; then
+VAULT_FROM_CONFIG=""
+if [ -n "$CONFIG" ] && [ "${FORCE:-0}" != "1" ]; then
     VAULT_FROM_CONFIG=$(jq -r '.secrets.manager // empty' "$CONFIG")
 fi
 

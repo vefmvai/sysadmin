@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # validate-config.sh — валидация sysadmin-config.json по JSON Schema.
 #
+# Конфиг живёт в infra/ оператора, схема — в sysadmin/ (публичный репо).
+#
 # Использование:
-#   validate-config.sh                              # валидирует sysadmin-config.json в текущей директории
-#   validate-config.sh /tmp/sysadmin-config-draft.json
+#   validate-config.sh                              # ищет конфиг в стандартных местах
+#   validate-config.sh /tmp/sysadmin-config-draft.json   # явный путь к draft-конфигу
 #
 # Возврат:
 #   0 — конфиг валиден.
@@ -12,16 +14,34 @@
 #
 # Способы валидации:
 #   1) check-jsonschema (предпочтительный) — если установлен через `pipx install check-jsonschema`.
-#   2) jq-fallback — минимальная проверка обязательных полей и enum'ов. Запускается, если
-#      check-jsonschema нет в PATH; печатает WARN.
+#   2) jq-fallback — минимальная проверка обязательных полей и enum'ов.
 
 set -u
 
-CONFIG="${1:-sysadmin-config.json}"
-SCHEMA="${INFRA_DIR:-$(pwd)}/sysadmin-config.schema.json"
+# Поиск конфига (если не передан аргументом — тот же алгоритм что в Cold Start персоны)
+if [ "$#" -ge 1 ]; then
+    CONFIG="$1"
+else
+    CONFIG=""
+    for candidate in \
+        "${INFRA_DIR:-/dev/null}/sysadmin-config.json" \
+        "./sysadmin-config.json" \
+        "../infra/sysadmin-config.json" \
+        "$HOME/infra/sysadmin-config.json" \
+        "$HOME/work/infra/sysadmin-config.json" \
+        "$HOME/projects/infra/sysadmin-config.json"; do
+        [ -f "$candidate" ] && { CONFIG="$candidate"; break; }
+    done
+    [ -z "$CONFIG" ] && { echo "ERROR: sysadmin-config.json не найден ни в одном стандартном месте"; exit 1; }
+fi
+
+# Схема живёт в sysadmin/ — относительно самого скрипта (он в .claude/skills/sysadmin-init/scripts/)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SYSADMIN_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
+SCHEMA="$SYSADMIN_ROOT/sysadmin-config.schema.json"
 
 [ -f "$CONFIG" ] || { echo "ERROR: $CONFIG не существует"; exit 1; }
-[ -f "$SCHEMA" ] || { echo "ERROR: $SCHEMA не существует (ожидался в $(dirname "$SCHEMA"))"; exit 1; }
+[ -f "$SCHEMA" ] || { echo "ERROR: схема $SCHEMA не найдена (ожидалась в корне репо sysadmin/)"; exit 1; }
 
 # --- Способ 1: check-jsonschema (предпочтительный) ---
 if command -v check-jsonschema >/dev/null 2>&1; then
