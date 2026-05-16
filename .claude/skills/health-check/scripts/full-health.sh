@@ -15,7 +15,6 @@
 
 set -u
 
-MODE="full"
 OUTPUT="${OUTPUT:-human}"
 SSH_TARGET="${SSH_TARGET:-}"
 

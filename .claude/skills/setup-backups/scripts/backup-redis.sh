@@ -37,7 +37,7 @@ if ! docker exec "$CONTAINER" redis-cli BGSAVE | grep -q "Background saving star
 fi
 
 # Ждём до 60 секунд, пока LASTSAVE изменится
-for i in $(seq 1 60); do
+for _ in $(seq 1 60); do
     NEW_LASTSAVE=$(docker exec "$CONTAINER" redis-cli LASTSAVE)
     if [ "$NEW_LASTSAVE" != "$PREV_LASTSAVE" ]; then
         break

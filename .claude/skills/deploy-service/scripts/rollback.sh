@@ -52,7 +52,12 @@ CURRENT_HEAD=$(ssh "$SERVER" "cd $REMOTE_DIR && git rev-parse HEAD")
 echo "[rollback] Записываю текущий HEAD как страховку: ${CURRENT_HEAD:0:8}"
 echo ""
 
-# Выполняем rollback на сервере
+# Выполняем rollback на сервере.
+# Heredoc намеренно без кавычек на EOF: переменные $REMOTE_DIR, $PREV_SHA,
+# $SERVICE_NAME раскрываются ЛОКАЛЬНО перед отправкой по SSH (на сервере
+# их нет в окружении). Это безопасно: значения провалидированы выше
+# (regex для PREV_SHA, обязательность SERVER/SERVICE_NAME).
+# shellcheck disable=SC2087
 ssh "$SERVER" bash -s <<EOF
 set -euo pipefail
 cd "$REMOTE_DIR"

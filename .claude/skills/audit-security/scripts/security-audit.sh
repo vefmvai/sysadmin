@@ -179,8 +179,8 @@ if [ "$SCOPE" = "all" ] || [ "$SCOPE" = "git" ]; then
             add_result git PASS "gitleaks scan (working tree + history)" "0 findings"
         else
             FINDINGS=$(gitleaks detect --no-banner --log-opts='--all' 2>&1 | grep -cE 'leaks found' || echo "?")
-            add_result git FAIL "gitleaks scan" "Найдены утечки"
-            add_recommendation "[FAIL] gitleaks нашёл секреты — запусти \`gitleaks detect --no-banner --log-opts='--all' --report-path report.json\` для деталей. Исправление: ротировать утёкшие секреты + git filter-repo для истории"
+            add_result git FAIL "gitleaks scan" "Найдены утечки ($FINDINGS findings)"
+            add_recommendation "[FAIL] gitleaks нашёл секреты ($FINDINGS findings) — запусти \`gitleaks detect --no-banner --log-opts='--all' --report-path report.json\` для деталей. Исправление: ротировать утёкшие секреты + git filter-repo для истории"
         fi
     else
         add_result git WARN "gitleaks scan" "gitleaks не установлен локально"
@@ -281,7 +281,7 @@ REPORT_FILE="${OUTPUT:-/tmp/security-audit-${TS}.md}"
     fi
     if [ ${#RECOMMENDATIONS[@]} -gt 0 ]; then
         echo "## Рекомендации"
-        local i=1
+        i=1
         for r in "${RECOMMENDATIONS[@]}"; do
             echo "$i. $r"
             i=$((i + 1))

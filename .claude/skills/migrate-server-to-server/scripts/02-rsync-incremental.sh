@@ -23,7 +23,6 @@ if [ -z "$OLD_SERVER" ] || [ -z "$NEW_SERVER" ]; then
     exit 2
 fi
 
-TS=$(date +%Y%m%d-%H%M%S)
 LINK_DEST=""
 if [ "$PHASE" != "день1" ]; then
     # Для день2/cutover используем предыдущий снапшот для hardlink dedupe
