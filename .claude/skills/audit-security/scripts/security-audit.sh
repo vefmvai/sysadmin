@@ -137,7 +137,7 @@ if [ "$SCOPE" = "all" ] || [ "$SCOPE" = "host" ]; then
     if [ -z "$EXTERNAL_PORTS" ]; then
         add_result host PASS "Открытые внешние порты" "только 22/80/443"
     else
-        add_result host WARN "Открытые внешние порты" "$(echo $EXTERNAL_PORTS | head -3)"
+        add_result host WARN "Открытые внешние порты" "$(echo "$EXTERNAL_PORTS" | head -3 | tr '\n' ' ')"
         add_recommendation "[WARN] Дополнительные порты слушают на 0.0.0.0 — проверь $EXTERNAL_PORTS, перевести на 127.0.0.1 если возможно"
     fi
 fi

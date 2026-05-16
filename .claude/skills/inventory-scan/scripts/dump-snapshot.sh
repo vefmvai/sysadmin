@@ -187,6 +187,8 @@ run_remote "host-scripts-list.txt" \
     "ls -la /opt/*.sh /opt/*.py /opt/*.yml 2>/dev/null; ls -la /usr/local/bin/*.sh /usr/local/sbin/*.sh 2>/dev/null; ls -la /root/bin/ 2>/dev/null"
 
 # 11. Содержимое хостовых скриптов в /opt (.sh)
+# shellcheck disable=SC2016
+# (single-quoted heredoc намеренный — переменные раскрываются на стороне сервера)
 run_remote "host-scripts-content.txt" \
     'for f in /opt/*.sh; do
   [ -f "$f" ] || continue
@@ -199,6 +201,7 @@ run_remote "host-scripts-content.txt" \
 done'
 
 # 12. Структура .env файлов на хосте (имена переменных, значения redacted)
+# shellcheck disable=SC2016
 run_remote "host-env-redacted.txt" \
     'for f in /opt/*.env; do
   [ -f "$f" ] || continue
@@ -211,6 +214,7 @@ run_remote "host-env-redacted.txt" \
 done'
 
 # 13. Содержимое /etc/cron.d/ и периодических директорий
+# shellcheck disable=SC2016
 run_remote "cron-d-content.txt" \
     'for f in /etc/cron.d/* /etc/cron.daily/* /etc/cron.hourly/* /etc/cron.weekly/* /etc/cron.monthly/*; do
   [ -f "$f" ] || continue
@@ -224,7 +228,7 @@ run_remote "systemd-enabled.txt" \
     "systemctl list-unit-files --type=service --state=enabled 2>/dev/null | grep -vE '^(UNIT|[0-9]+ unit|systemd-|sys-|snap\\.)' | head -50"
 
 # === Итог ===
-FILE_COUNT=$(ls -1 "$SNAPSHOT_DIR" | wc -l)
+FILE_COUNT=$(find "$SNAPSHOT_DIR" -maxdepth 1 -type f | wc -l | tr -d ' ')
 echo ""
 echo "======================================================"
 echo "Снимок сохранён в ${SNAPSHOT_DIR}"

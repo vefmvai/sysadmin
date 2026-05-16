@@ -36,7 +36,7 @@ gpg --version | head -1
 echo ""
 echo "[pass] Проверяю GPG-ключи..."
 
-GPG_KEYS=$(gpg --list-secret-keys --keyid-format LONG 2>/dev/null | grep -E '^(sec|ssb)' | wc -l | tr -d ' ')
+GPG_KEYS=$(gpg --list-secret-keys --keyid-format LONG 2>/dev/null | grep -cE '^(sec|ssb)')
 
 if [ "$GPG_KEYS" -eq 0 ]; then
     echo "[pass] Нет GPG-ключей — нужно создать."

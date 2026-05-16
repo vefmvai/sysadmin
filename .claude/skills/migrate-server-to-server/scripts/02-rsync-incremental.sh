@@ -44,6 +44,8 @@ case "$PHASE" in
         ;;
     день2)
         echo "[Delta rsync — обычно секунды-минуты]"
+        # shellcheck disable=SC2086
+        # ($LINK_DEST раскрывается в "--link-dest=/path" — должно быть split на 1 аргумент)
         rsync -avz --progress --delete $LINK_DEST \
             --rsync-path="sudo rsync" \
             "$OLD_SERVER":/var/lib/docker/volumes/ \
@@ -63,6 +65,7 @@ case "$PHASE" in
         "
 
         # Финальный delta
+        # shellcheck disable=SC2086
         rsync -avz --progress --delete $LINK_DEST \
             --rsync-path="sudo rsync" \
             "$OLD_SERVER":/var/lib/docker/volumes/ \

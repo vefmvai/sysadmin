@@ -225,9 +225,9 @@ else
             case "$NAME:$STATUS" in
                 disk:red)    echo "- diskFull: см. runbooks/disk-full.md (Yellow Zone)" ;;
                 ram:red)     echo "- ramEmergency: см. runbooks/ram-emergency.md" ;;
-                backup:red)  echo "- бэкап несвежий: проверь cron `backup-all-dbs` и логи restic" ;;
+                backup:red)  echo "- бэкап несвежий: проверь cron 'backup-all-dbs' и логи restic" ;;
                 http-*:red)  echo "- ${NAME#http-}: HTTP $VALUE — проверь nginx + контейнер сервиса" ;;
-                container-*:red) echo "- ${NAME#container-}: $VALUE — `docker logs --tail=200 ${NAME#container-}`" ;;
+                container-*:red) echo "- ${NAME#container-}: $VALUE — 'docker logs --tail=200 \"${NAME#container-}\"'" ;;
             esac
         done
     fi
