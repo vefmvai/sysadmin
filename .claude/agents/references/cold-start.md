@@ -6,16 +6,23 @@
 
 Перед всем остальным — читаю `sysadmin-config.json`. Это паспорт оператора: язык общения, имя оператора, менеджер паролей, какие подсистемы включены (мониторинг, бэкапы, Telegram), какой у меня сервер, и **где живёт папка с инфрой** (поле `infrastructure.root_path`). Без этой информации я не знаю, на каком языке отвечать и куда смотреть.
 
-### Поиск конфига (после разнесения)
+### Поиск конфига
 
-Меня могут позвать из любого cwd — из `sysadmin/`, из `infra/`, из совершенно другого проекта-носителя. Алгоритм:
+`sysadmin-config.json` живёт **в приватной папке `infra/` оператора** — это его личные данные, версионируются в его приватном репо. В публичном `sysadmin/` хранится только `sysadmin-config.example.json` (шаблон) и `sysadmin-config.schema.json` (контракт).
 
-1. Если `./sysadmin-config.json` существует в текущем cwd — читаю его. Это сценарий «оператор работает прямо в `sysadmin/`».
-2. Если `../sysadmin/sysadmin-config.json` существует — читаю его. Это самый частый сценарий: оператор работает в `infra/` (соседняя папка), агент идёт за конфигом к соседу.
-3. Если ни первое, ни второе — пробую типичные пути: `~/projects/sysadmin/sysadmin-config.json`, `~/work/sysadmin/sysadmin-config.json`, `~/sysadmin/sysadmin-config.json`. Беру первый существующий.
-4. Если нигде не нашёл — спрашиваю оператора одной строкой: «Где у тебя живёт `sysadmin-config.json`?» Это **допустимый** вопрос (тонкая граница: спрашиваю про **свой** конфиг, не про инфру), потому что без конфига я не могу работать.
+Меня могут позвать из любого cwd. Алгоритм поиска:
 
-После того как нашёл — запоминаю путь как `$CONFIG_PATH` (использую дальше для записи `meta`-флагов и валидации).
+1. **Если `./sysadmin-config.json` существует в cwd** — читаю его. Это сценарий «оператор работает прямо в `infra/`».
+2. **Если `../infra/sysadmin-config.json` существует** — читаю. Это сценарий «оператор работает в `sysadmin/`, infra — соседняя папка».
+3. **Попробовать «соседи»** — относительно cwd ищу `../infra/`, `../../infra/`, `../sysadmin/`, чьим соседом является `infra/`.
+4. **Типичные пути** — `~/infra/sysadmin-config.json`, `~/work/infra/sysadmin-config.json`, `~/projects/infra/sysadmin-config.json`. Беру первый существующий.
+5. **Если нигде не нашёл** — спрашиваю оператора одной строкой: «Где у тебя живёт папка `infra/` с `sysadmin-config.json`?» Это **допустимый** вопрос (тонкая граница: спрашиваю про **свой** конфиг, не про инфру), потому что без конфига я не могу работать.
+
+После того как нашёл — запоминаю путь как `$CONFIG_PATH` (использую дальше для записи `meta`-флагов и валидации). Папка, в которой лежит конфиг — это `$INFRA` (см. Шаг 2).
+
+**Бэкап-источник информации о месте конфига:** если в bridge-файле `~/.claude/agents/sysadmin.md` явно указан абсолютный путь к sysadmin/ — оператор в той же родительской папке обычно держит и `infra/`. Это эвристика, не гарантия.
+
+**Legacy-fallback:** если `sysadmin-config.json` нашёлся в `sysadmin/` (там, где он жил до разнесения 2026-05-16) — это допустимо для старых установок. Предупреждаю оператора: «конфиг живёт в публичном репо `sysadmin/`, при переустановке репо его потеряешь. Перенесём в `infra/sysadmin-config.json`?» Не делаю автомиграцию без согласия — у оператора могут быть свои причины.
 
 ### Применение настроек
 
@@ -48,15 +55,15 @@
 Если пользователь в ответ на напоминание (или в любой момент работы) пишет одну из фраз: «не хочу учиться», «не хочу обучаться», «выключи напоминания про знакомство», «убери подсказку про /sysadmin-meet» — это сигнал поставить `meta.onboarding_completed: true`. Действия:
 
 1. Подтверждаю короткой строкой: «Понял, выключаю напоминания. Если передумаешь — `/sysadmin-meet` всегда доступен.»
-2. Через `jq` обновляю конфиг:
+2. Через `jq` обновляю конфиг (использую `$CONFIG_PATH` из поиска):
    ```bash
-   tmp=$(mktemp) && jq --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '.meta.onboarding_completed = true | .meta.onboarding_completed_at = $ts' sysadmin-config.json > "$tmp" && mv "$tmp" sysadmin-config.json
+   tmp=$(mktemp) && jq --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '.meta.onboarding_completed = true | .meta.onboarding_completed_at = $ts' "$CONFIG_PATH" > "$tmp" && mv "$tmp" "$CONFIG_PATH"
    ```
 3. Если поля `meta` в конфиге нет (старый конфиг) — создаю его целиком:
    ```bash
-   tmp=$(mktemp) && jq --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '. + {meta: {onboarding_completed: true, onboarding_completed_at: $ts}}' sysadmin-config.json > "$tmp" && mv "$tmp" sysadmin-config.json
+   tmp=$(mktemp) && jq --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '. + {meta: {onboarding_completed: true, onboarding_completed_at: $ts}}' "$CONFIG_PATH" > "$tmp" && mv "$tmp" "$CONFIG_PATH"
    ```
-4. Валидирую через `check-jsonschema --schemafile sysadmin-config.schema.json sysadmin-config.json`.
+4. Валидирую через `check-jsonschema --schemafile <sysadmin-путь>/sysadmin-config.schema.json "$CONFIG_PATH"`. Где `<sysadmin-путь>` — корень публичного репо sysadmin (схема живёт там).
 5. Продолжаю работу над текущей задачей оператора (если она была) или жду следующую.
 
 ### Если файла нет
