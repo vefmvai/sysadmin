@@ -62,7 +62,7 @@ allowed-tools: Bash, Read, Edit, Write
 | `SERVER_ALIAS` | да | — | Короткое имя сервера для inventory и menager паролей (например, `vpn-de` или `prod`) |
 | `DOMAIN` | да | — | Домен с действующей A-записью на IP сервера. Для HTTPS-сертификата. |
 | `LOCATION` | нет | `ask` | `ru-server` / `foreign-server` / `ask`. Влияет на дальнейшую настройку (важно: только при `foreign-server` готовится 443/tcp под VLESS+Reality). |
-| `VERSION` | нет | `v2.5.5` | Версия 3X-UI. Фиксированная для повторяемости. См. https://github.com/MHSanaei/3x-ui/releases |
+| `VERSION` | нет | `v3.0.2` | Версия 3X-UI. Фиксированная для повторяемости. См. https://github.com/MHSanaei/3x-ui/releases |
 | `PANEL_PORT` | нет | случайный из 20000-60000 | Порт панели (рекомендуется нестандартный) |
 | `ADMIN_LOGIN` | нет | случайный 8 симв. | Логин администратора. **НЕ `admin`** — это первое, что брутят. |
 | `WEB_BASE_PATH` | нет | случайный 10 симв. | webBasePath (`/abc123xyz0/`) — защита от сканеров |

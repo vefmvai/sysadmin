@@ -156,7 +156,7 @@ bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.
 breaking changes):
 
 ```bash
-VERSION=v2.5.5 && bash <(curl -Ls "https://raw.githubusercontent.com/mhsanaei/3x-ui/$VERSION/install.sh") $VERSION
+VERSION=v3.0.2 && bash <(curl -Ls "https://raw.githubusercontent.com/mhsanaei/3x-ui/$VERSION/install.sh") $VERSION
 ```
 
 ### 2.2 Поддерживаемые ОС
@@ -188,7 +188,7 @@ VERSION=v2.5.5 && bash <(curl -Ls "https://raw.githubusercontent.com/mhsanaei/3x
 - ENV vars, влияющие на установку:
   - `XUI_MAIN_FOLDER` — директория установки (default: `/usr/local/x-ui`).
   - `XUI_SERVICE` — путь для systemd (default: `/etc/systemd/system`).
-- Установщик принимает **аргумент с версией**: `bash install.sh v2.5.5`.
+- Установщик принимает **аргумент с версией**: `bash install.sh v3.0.2`.
 
 ### 2.4 Docker-образ
 
