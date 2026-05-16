@@ -137,7 +137,7 @@ async with aiohttp.ClientSession(connector=connector) as session:
 ## Связанные документы
 
 - `socks5-vs-socks5h.md` (в этом же скилле) — почему буква `h` критична.
-- `../../knowledge/networking/vpn-protocols.md` §5 — серверный прокси
+- `../../knowledge/networking/_reference/vpn-protocols.md` §5 — серверный прокси
   концептуально.
 
 ---

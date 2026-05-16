@@ -359,8 +359,8 @@ api_call DELETE "/panel/api/inbounds/del/$MIXED_INBOUND_ID"
 
 - `references/python-libs-with-proxy.md` — таблица библиотек и проблемных кейсов.
 - `references/socks5-vs-socks5h.md` — почему буква `h` критична.
-- `../../knowledge/networking/vpn-protocols.md` §5 — серверный прокси теория.
-- `../../knowledge/networking/3x-ui-panel.md` §7.7 — подводный камень self-loop.
-- `../../knowledge/networking/3x-ui-api.md` — REST API для inbound/routing.
+- `../../knowledge/networking/_reference/vpn-protocols.md` §5 — серверный прокси теория.
+- `../../knowledge/networking/_reference/3x-ui-panel.md` §7.7 — подводный камень self-loop.
+- `../../knowledge/networking/_reference/3x-ui-api.md` — REST API для inbound/routing.
 - `decisions/0005-vpn-architecture.md` §4 — архитектурное решение.
 - `evals/triggers.md` — фразы оператора.

@@ -351,8 +351,8 @@ ssh $SSH_TARGET "rm -rf /root/cert/$DOMAIN; /root/.acme.sh/acme.sh --revoke -d $
 
 - `references/tls-method-choice.md` — обоснование 3 методов TLS.
 - `references/panel-hardening.md` — чек-лист безопасности панели.
-- `../../knowledge/networking/3x-ui-panel.md` — архитектура 3X-UI и подводные камни.
-- `../../knowledge/networking/3x-ui-api.md` — REST API (для последующих скиллов).
-- `../../knowledge/networking/vpn-protocols.md` — выбор протоколов inbound/outbound.
+- `../../knowledge/networking/_reference/3x-ui-panel.md` — архитектура 3X-UI и подводные камни.
+- `../../knowledge/networking/_reference/3x-ui-api.md` — REST API (для последующих скиллов).
+- `../../knowledge/networking/_reference/vpn-protocols.md` — выбор протоколов inbound/outbound.
 - `decisions/0005-vpn-architecture.md` — архитектурное решение.
 - `evals/triggers.md` — фразы оператора для распознавания скилла.

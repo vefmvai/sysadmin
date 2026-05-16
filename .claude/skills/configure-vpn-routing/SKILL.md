@@ -352,8 +352,8 @@ api_restart_xray
 
 - `references/multi-hop-architectures.md` — два пути outbound + гибрид.
 - `references/subscription-formats.md` — форматы подписок провайдеров.
-- `../../knowledge/networking/vpn-protocols.md` §4 — теория multi-hop.
-- `../../knowledge/networking/3x-ui-api.md` §6 — outbounds + routing через API.
-- `../../knowledge/networking/3x-ui-panel.md` §1.3-1.4 — balancers + observatory.
+- `../../knowledge/networking/_reference/vpn-protocols.md` §4 — теория multi-hop.
+- `../../knowledge/networking/_reference/3x-ui-api.md` §6 — outbounds + routing через API.
+- `../../knowledge/networking/_reference/3x-ui-panel.md` §1.3-1.4 — balancers + observatory.
 - `decisions/0005-vpn-architecture.md` §3 — архитектурное решение.
 - `evals/triggers.md` — фразы оператора.

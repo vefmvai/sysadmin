@@ -237,8 +237,8 @@ ping. Каждые 3 минуты переоценивает.
 
 - `platform-quirks.md` (в этом же скилле) — ограничения и особенности
   платформ при импорте sing-box JSON.
-- `../../knowledge/networking/client-apps.md` — карта клиентов и форматов.
-- `../../knowledge/networking/vpn-protocols.md` §4 — multi-hop теория.
+- `../../knowledge/networking/_reference/client-apps.md` — карта клиентов и форматов.
+- `../../knowledge/networking/_reference/vpn-protocols.md` §4 — multi-hop теория.
 
 ---
 

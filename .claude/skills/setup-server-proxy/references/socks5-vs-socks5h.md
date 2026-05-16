@@ -132,8 +132,8 @@ docs), стало де-факто стандартом для всех Python-HT
 ## Связанные документы
 
 - `python-libs-with-proxy.md` (в этом же скилле) — таблица библиотек.
-- `../../knowledge/networking/vpn-protocols.md` §5.2 — теория socks5h.
-- `../../knowledge/networking/3x-ui-api.md` — mixed inbound через API.
+- `../../knowledge/networking/_reference/vpn-protocols.md` §5.2 — теория socks5h.
+- `../../knowledge/networking/_reference/3x-ui-api.md` — mixed inbound через API.
 
 ---
 

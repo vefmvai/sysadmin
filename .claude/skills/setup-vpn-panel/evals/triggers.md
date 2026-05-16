@@ -24,7 +24,7 @@
 - «добавь клиента в панель» — это `/configure-vpn-routing` (управление клиентами на существующей панели)
 - «настрой прокси на сервере чтобы бот видел Claude API» — это `/setup-server-proxy`, не установка панели
 - «сделай мне vless-ссылку для iPhone» — это `/generate-client-config`
-- «расскажи как работает VLESS+Reality» — это вопрос про знания, ответ персоны со ссылкой на `.claude/knowledge/networking/vpn-protocols.md`
+- «расскажи как работает VLESS+Reality» — это вопрос про знания, ответ персоны со ссылкой на `.claude/knowledge/networking/_reference/vpn-protocols.md`
 - «у меня уже стоит x-ui, обнови до новой версии» — это `/deploy-service` (update), не setup-vpn-panel
 - «удали 3X-UI с сервера» — обратная операция, скилл этого не делает
 - «настрой VPN на ноутбуке» — это клиент, не сервер

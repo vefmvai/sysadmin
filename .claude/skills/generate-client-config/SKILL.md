@@ -226,7 +226,7 @@ rm -rf "$OUTPUT_DIR"
 - `references/singbox-config-recipes.md` — 6 готовых рецептов под разные
   сценарии.
 - `references/platform-quirks.md` — ограничения каждой платформы.
-- `../../knowledge/networking/client-apps.md` — карта клиентов sing-box/xray.
-- `../../knowledge/networking/vpn-protocols.md` §1.7 — теория VLESS+Reality.
+- `../../knowledge/networking/_reference/client-apps.md` — карта клиентов sing-box/xray.
+- `../../knowledge/networking/_reference/vpn-protocols.md` §1.7 — теория VLESS+Reality.
 - `decisions/0005-vpn-architecture.md` §5 — стратегия совместимости.
 - `evals/triggers.md` — фразы оператора.

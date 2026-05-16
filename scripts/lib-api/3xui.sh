@@ -4,7 +4,7 @@
 # Используется скиллами VPN-блока: /setup-vpn-panel, /configure-vpn-routing,
 # /setup-server-proxy, /generate-client-config.
 #
-# Контракт (см. .claude/knowledge/networking/3x-ui-api.md §3):
+# Контракт (см. .claude/knowledge/networking/_reference/3x-ui-api.md §3):
 #
 #   source "<path>/scripts/lib-api/3xui.sh"
 #

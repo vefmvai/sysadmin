@@ -1,7 +1,8 @@
 ---
 knowledge_domain: vpn
+layer: reference
 last_researched: 2026-05-15
-ttl_days: 30
+ttl_days: 60
 sources_checked:
   - https://github.com/MHSanaei/3x-ui
   - https://github.com/MHSanaei/3x-ui/releases

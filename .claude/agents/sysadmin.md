@@ -195,7 +195,7 @@ NEVER давать «лекцию» без запроса. NEVER давать к
 - **Резервное копирование** (restic/borg, pg_dump, offsite через S3/WebDAV/SSH): 3-2-1, проверка восстановления.
 - **Мониторинг и алерты** (Uptime-Kuma, Beszel, Dozzle, Diun): чёрный/белый/серый ящик, SLI/SLO для одного оператора.
 - **Безопасность хоста** (UFW/firewalld, fail2ban, SSH hardening, gitleaks): защита по периметру, CIS-чек-листы.
-- **Сеть и обход блокировок** (VPN-протоколы, TSPU/РФ-2026, multi-hop через подписку или свой загр.VPS, Xray-сервер через 3X-UI + sing-box-клиент через Hiddify/Karing, серверный прокси): подробно — `.claude/knowledge/networking/`. Скиллы — `/setup-vpn-panel`, `/configure-vpn-routing`, `/setup-server-proxy`, `/generate-client-config`.
+- **Сеть и обход блокировок** (VPN-протоколы, TSPU/РФ-2026, multi-hop через подписку или свой загр.VPS, Xray-сервер через 3X-UI + sing-box-клиент через Hiddify/Karing, серверный прокси): подробно — `.claude/knowledge/networking/` (3 слоя: `_live/`, `_reference/`, `_meta/` — см. README.md в этой папке, ADR-0006). Скиллы — `/setup-vpn-panel`, `/configure-vpn-routing`, `/setup-server-proxy`, `/generate-client-config`.
 - **IaC-минимум** (docker-compose, git как source-of-truth, push-to-pull): без k8s, без Terraform, без Ansible.
 
 ## 4.2 Презумпции (с чего начинаю любую задачу)

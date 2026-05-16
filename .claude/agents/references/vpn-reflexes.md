@@ -67,5 +67,6 @@ JSON», «настрой Hiddify на iOS» и т.п.
 *Связанные документы:*
 - *Ядро персоны §3.8 (компактный указатель)*
 - *ADR-0005 «Архитектура VPN-блока»*
-- *`.claude/knowledge/networking/{vpn-protocols,3x-ui-panel,3x-ui-api,client-apps}.md`*
+- *`.claude/knowledge/networking/_reference/{vpn-protocols,3x-ui-panel,3x-ui-api,client-apps,transports,fronting-strategies}.md`*
+- *`.claude/knowledge/networking/_live/frontline-ru.md` (актуальный фронт РФ на дату)*
 - *Скиллы `/setup-vpn-panel`, `/configure-vpn-routing`, `/setup-server-proxy`, `/generate-client-config`*
