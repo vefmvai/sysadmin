@@ -192,18 +192,60 @@ fi
 
 ```bash
 cd "$SYSADMIN_ROOT"
-git fetch origin --tags
-# Показываю changelog от текущей версии до последней
-CURRENT_TAG="v$(cat VERSION)"
+
+# 1. Проверка: нет локальных изменений (иначе git checkout их перезапишет)
+if ! git diff-index --quiet HEAD -- 2>/dev/null; then
+    cat <<'EOF' >&2
+В sysadmin/ есть локальные изменения (правки персоны, скиллов или конфигов).
+Обновление перезаписало бы их без вопросов.
+
+Варианты:
+1. Сохранить изменения отдельной веткой: git switch -c my-tweaks && git stash pop
+2. Откатить изменения: git restore . (УДАЛИТ правки!)
+3. Скоммитить изменения как форк: git add . && git commit -m "local tweaks"
+
+После этого повтори «обнови sysadmin».
+EOF
+    exit 1
+fi
+
+# 2. Подтягиваем теги
+git fetch origin --tags --quiet
+
+# 3. Определяем текущую и последнюю версию
+# Берём из git, а не из cat VERSION — VERSION в tree может быть из старой версии,
+# если кто-то редактировал файл, а git checkout фиксирует именно состояние коммита.
+CURRENT_TAG=$(git describe --tags --exact-match HEAD 2>/dev/null \
+            || echo "v$(cat VERSION 2>/dev/null || echo 0.0.0)")
 LATEST_TAG=$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
+
+if [ "$CURRENT_TAG" = "$LATEST_TAG" ]; then
+    echo "Уже на последней версии ($CURRENT_TAG). Нечего обновлять."
+    exit 0
+fi
+
+# 4. Показываю changelog
 echo "=== Changelog $CURRENT_TAG → $LATEST_TAG ==="
 git log "$CURRENT_TAG..$LATEST_TAG" --oneline
-# Спрашиваю «Применить?» (Yellow Zone — мы меняем мозг агента)
-# При согласии:
-git checkout "$LATEST_TAG"  # фиксируем точную версию
-# Если есть миграция из release notes — выполняю
-echo "Готово. Перезапусти сессию Claude Code, чтобы новый мозг загрузился."
+
+# 5. Спрашиваю «Применить?» (Yellow Zone — мы меняем мозг агента).
+#    При согласии:
+#
+#    Переключаемся на тег через --detach явно. Это detached HEAD — правильное
+#    состояние для версионированной установки: tree точно соответствует тегу,
+#    случайный коммит невозможен. Следующее обновление снова через git fetch
+#    + git checkout --detach, так что detached HEAD здесь не баг, а контракт.
+git checkout --detach "$LATEST_TAG"
+
+# 6. Если есть миграция из release notes — выполняю
+echo "Готово. Текущий тег: $(git describe --tags --exact-match HEAD)."
+echo "Перезапусти сессию Claude Code, чтобы новый мозг загрузился."
 ```
+
+**Альтернативный сценарий — оператор хочет следить за main, а не за тегами.**
+Это допустимо, но не рекомендуется: на main могут быть несвязные коммиты между
+релизами. Если оператор настаивает: `git switch main && git pull --ff-only`.
+В этом случае команда «обнови sysadmin» сводится к одному `git pull --ff-only`.
 
 **Что НЕ делать:**
 
