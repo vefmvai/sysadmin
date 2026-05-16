@@ -1,0 +1,72 @@
+%% domains-routing.mmd — маршрутизация HTTPS-трафика
+%%
+%% Показывает: какой домен через какой nginx-vhost попадает в какой
+%% upstream-контейнер. Где живут TLS-сертификаты, какие redirect'ы.
+%%
+%% Заполняется скиллом /inventory-scan на основе:
+%%   - inventory/hosts/<host>/domains.md (домены, TLS-paths, статус)
+%%   - nginx-конфиги из snapshot (sites-available + sites-enabled)
+%%   - inventory/hosts/<host>/services.md (upstream-таргеты)
+%%
+%% Условные обозначения:
+%%   ─→  активный домен → upstream
+%%   ⇢  redirect (без TLS-проверки)
+%%   ✕  отсутствует / выключен
+
+flowchart LR
+    %% === Группа: продуктовые сайты ===
+    subgraph PROD["Продуктовые сайты"]
+        D1[<domain-1>]:::active
+        D2[<domain-2>]:::active
+    end
+
+    %% === Группа: мониторинг ===
+    subgraph MON["Мониторинг"]
+        DM1[<monitoring-domain-1>]:::mon
+        DM2[<monitoring-domain-2>]:::mon
+    end
+
+    %% === Группа: VPN/прокси ===
+    subgraph VPN["VPN-инфра"]
+        DV1[<vpn-panel-domain>]:::vpn
+    end
+
+    %% === Группа: redirects ===
+    subgraph REDIR["Redirects (www → root, старые домены)"]
+        DR1[www.&lt;domain-1&gt;]:::redirect
+        DR2[&lt;old-domain&gt;]:::redirect
+    end
+
+    %% === Nginx как центральная точка ===
+    Nginx{nginx<br/>vhosts}:::nginx
+
+    %% === Upstreams (контейнеры) ===
+    subgraph UPSTREAM["Upstreams"]
+        U1[<service-1><br/>127.0.0.1:&lt;p1&gt;]:::upstream
+        U2[<service-2><br/>127.0.0.1:&lt;p2&gt;]:::upstream
+        UM[<monitoring-stack><br/>127.0.0.1:&lt;pm&gt;]:::upstream
+        UV[<3x-ui><br/>:&lt;panel-port&gt;]:::upstream
+    end
+
+    %% === Связи ===
+    D1 --> Nginx
+    D2 --> Nginx
+    DM1 --> Nginx
+    DM2 --> Nginx
+    DV1 --> Nginx
+
+    DR1 -.301 redirect.-> D1
+    DR2 -.301 redirect.-> D2
+
+    Nginx --> U1
+    Nginx --> U2
+    Nginx --> UM
+    Nginx --> UV
+
+    %% === Стили ===
+    classDef active fill:#bbf7d0,stroke:#16a34a,color:#000
+    classDef mon fill:#dbeafe,stroke:#2563eb,color:#000
+    classDef vpn fill:#fce7f3,stroke:#db2777,color:#000
+    classDef redirect fill:#e5e7eb,stroke:#6b7280,color:#000,stroke-dasharray: 4 4
+    classDef nginx fill:#f3f4f6,stroke:#374151,color:#000
+    classDef upstream fill:#fef3c7,stroke:#d97706,color:#000

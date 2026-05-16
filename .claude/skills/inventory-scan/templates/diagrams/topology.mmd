@@ -1,0 +1,67 @@
+%% topology.mmd — общая карта инфраструктуры
+%%
+%% Высокоуровневое представление: где живут серверы, какие группы
+%% сервисов на них, как они связаны с внешним миром.
+%%
+%% Заполняется скиллом /inventory-scan на основе:
+%%   - inventory/hosts/<host>/server.md (имя, IP, провайдер, ОС)
+%%   - inventory/hosts/<host>/services.md (контейнеры → группы)
+%%   - inventory/hosts/<host>/domains.md (внешние домены)
+%%
+%% Группы сервисов (стандартные):
+%%   - apps       — продуктовые приложения
+%%   - shared-db  — общие БД
+%%   - monitoring — мониторинг-стек
+%%   - vpn        — VPN-инфраструктура
+%%   - infra      — служебные (nginx, bot-frps и т.п.)
+
+flowchart LR
+    %% === Внешний мир ===
+    Internet([Интернет]):::external
+    Operator([Оператор / клиенты]):::external
+
+    %% === Серверы (одна subgraph на каждый VPS) ===
+    subgraph SERVER1["<host-alias> · <provider> · <ip>"]
+        direction TB
+
+        subgraph APPS["apps"]
+            App1[<service-1>]:::app
+            App2[<service-2>]:::app
+        end
+
+        subgraph DB["shared-db"]
+            Postgres[(<postgres>)]:::db
+            Redis[(<redis>)]:::db
+        end
+
+        subgraph MON["monitoring"]
+            Monitoring[<monitoring-stack>]:::mon
+        end
+
+        subgraph VPN["vpn"]
+            VPNPanel[<vpn-panel>]:::vpn
+        end
+
+        Nginx[nginx · reverse-proxy]:::infra
+    end
+
+    %% === Связи ===
+    Internet --> Nginx
+    Operator -.SSH.-> SERVER1
+    Operator -.VPN-клиент.-> VPNPanel
+
+    Nginx --> App1
+    Nginx --> App2
+    Nginx --> Monitoring
+
+    App1 --> Postgres
+    App2 --> Postgres
+    App1 --> Redis
+
+    %% === Стили (цветовая семантика) ===
+    classDef external fill:#e8e8e8,stroke:#666,color:#000
+    classDef app fill:#bbf7d0,stroke:#16a34a,color:#000
+    classDef db fill:#fef3c7,stroke:#d97706,color:#000
+    classDef mon fill:#dbeafe,stroke:#2563eb,color:#000
+    classDef vpn fill:#fce7f3,stroke:#db2777,color:#000
+    classDef infra fill:#f3f4f6,stroke:#6b7280,color:#000

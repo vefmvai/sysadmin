@@ -1,11 +1,12 @@
 ---
 name: inventory-scan
 description: |
-  Read-only инвентаризация сервера: dump-snapshot.sh → 8 документов в inventory/ (services,
-  networks, volumes, databases, domains, cron, host-scripts, server). Сравнение с прошлым
-  inventory с выделением drift'ов. Green Zone.
+  Read-only инвентаризация сервера: dump-snapshot.sh → 8 текстовых документов в inventory/
+  (services, networks, volumes, databases, domains, cron, host-scripts, server)
+  + 4 mermaid-диаграммы в inventory/diagrams/ (topology, services-network, domains-routing,
+  vpn-architecture). Сравнение с прошлым inventory с выделением drift'ов. Green Zone.
   Триггеры: «инвентаризация», «снять снимок сервера», «что у меня на сервере», «обновить inventory»,
-  «scan server», «inventory drift», «refresh inventory».
+  «обнови схемы инфры», «отрисуй диаграмму», «scan server», «inventory drift», «refresh inventory».
   НЕ для изменений на сервере (это cleanup-existing-server и др.); НЕ для аудита безопасности
   (audit-security).
 allowed-tools: Bash, Read, Edit, Write
@@ -134,6 +135,45 @@ host-scripts / server):
 Никогда не переписываю файл с нуля — теряется история ручных правок и комментариев
 оператора.
 
+## Шаг 4.5. Mermaid-диаграммы инфраструктуры
+
+После обновления текстовых документов inventory — обновить визуальные mermaid-диаграммы в `$INFRA/inventory/diagrams/`.
+
+**Шаблоны** (4 файла) лежат в публичном репо: `<sysadmin-root>/.claude/skills/inventory-scan/templates/diagrams/`.
+
+**Алгоритм:**
+
+```bash
+DIAGRAMS_DIR="$INFRA/inventory/diagrams"
+TEMPLATES_DIR="<SYSADMIN_ROOT>/.claude/skills/inventory-scan/templates/diagrams"
+
+mkdir -p "$DIAGRAMS_DIR"
+
+# Если папка пустая (первый запуск) — копирую все шаблоны
+if [ -z "$(ls -A "$DIAGRAMS_DIR" 2>/dev/null)" ]; then
+    cp "$TEMPLATES_DIR"/*.mmd "$DIAGRAMS_DIR/"
+    cp "$TEMPLATES_DIR/README.md" "$DIAGRAMS_DIR/"
+fi
+```
+
+**Что обновляется в каждой диаграмме** (использую `Edit`, не переписываю целиком):
+
+1. **`topology.mmd`** — высокоуровневая карта. Источник: `services.md` (группы), `domains.md` (внешние домены), `server.md` (имя хоста, провайдер, IP).
+2. **`services-network.mmd`** — Docker-сети + контейнеры + порты. Источник: `networks.md` + `services.md` (колонки «Порт» и «Сеть»).
+3. **`domains-routing.mmd`** — домен → nginx → upstream. Источник: `domains.md` + nginx-конфиги из snapshot (`nginx-sites.txt`).
+4. **`vpn-architecture.mmd`** — **только если** `vpn.enabled: true` в `sysadmin-config.json`. Иначе удалить файл из `diagrams/` (если был от прошлого запуска). Источник: `sysadmin-config.json` секция vpn + `services.md` (3x-ui контейнер) + `networks.md` (mixed inbound если есть).
+
+**Правила:**
+
+- Все плейсхолдеры `<...>` из шаблона должны быть заменены на реальные значения. Если данных нет — `<? уточнить>` (видно что незаполнено).
+- Стили (`classDef`) не трогать — единый визуальный язык.
+- Не удалять `%%` комментарии в начале файла — они нужны будущим читателям.
+- В конце каждой диаграммы — комментарий `%% Last updated: YYYY-MM-DD by /inventory-scan`.
+
+**Проверка валидности:** если установлен `mmdc` (mermaid CLI) — запустить `mmdc -i diagrams/<file>.mmd -o /tmp/test.svg` для каждой обновлённой диаграммы, убедиться что синтаксис валидный. Если `mmdc` не установлен — пропустить, только предупредить оператора одной строкой.
+
+**Поведение при первом запуске на сервере с уже существующим хаосом** (через `cleanup-existing-server`): шаблоны копируются с плейсхолдерами, заполняются настолько, насколько inventory заполнен. Дозаполнение — при следующих прогонах после `cleanup`.
+
 ## Шаг 5. Honest unknown — везде
 
 Если данные не получены (snapshot-файл пустой, syntax error, поле отсутствует) —
@@ -160,6 +200,7 @@ find "$INVENTORY_DIR/hosts/<host>/snapshots/" -mindepth 1 -maxdepth 1 -type d \
 - Размер snapshot (МБ)
 - Список drift'ов (если найдены) — с категориями + / - / ~
 - Список изменённых inventory-документов
+- **Список обновлённых mermaid-диаграмм** (`diagrams/topology.mmd`, и т.д.). Если первая инвентаризация и диаграммы созданы с нуля — отметить «созданы из шаблонов».
 - Рекомендации, если нужно: что ещё проверить вручную
 
 # Failed Attempts (граблекейс)

@@ -1,0 +1,81 @@
+%% vpn-architecture.mmd — VPN-инфраструктура
+%%
+%% Показывает: 3X-UI панель, её inbound'ы (входные двери), outbound'ы
+%% (выходные двери), маршрутизацию (Россия напрямую / заграница через
+%% upstream), серверный прокси (если включён), подключения клиентских
+%% устройств.
+%%
+%% Заполняется скиллом /inventory-scan на основе:
+%%   - sysadmin-config.json секция vpn (panel_url, upstream_kind, server_proxy_enabled)
+%%   - inventory/hosts/<host>/services.md (3x-ui контейнер)
+%%   - inventory/hosts/<host>/networks.md (mixed inbound 127.0.0.1:1080 если есть)
+%%
+%% Если VPN не настроен (vpn.enabled=false в конфиге) — этот файл
+%% не генерируется, оставайся пустым.
+%%
+%% Сценарии (один из):
+%%   1. single-hop  — клиент → панель → direct в интернет
+%%   2. multi-hop через подписку — клиент → панель → upstream(подписка) → интернет
+%%   3. multi-hop через свой загр.VPS — клиент → ru-панель → загр.панель → интернет
+%%   4. server-proxy — программы на сервере → mixed inbound → routing → ...
+
+flowchart LR
+    %% === Клиентские устройства оператора ===
+    subgraph CLIENTS["Клиенты"]
+        iPhone[<iPhone>]:::client
+        Android[<Android>]:::client
+        Mac[<macOS>]:::client
+    end
+
+    %% === Программы на сервере (если server-proxy enabled) ===
+    subgraph SVRPROG["Программы на сервере"]
+        BotPy[<python-bot>]:::svrprog
+        CurlCli[curl / npm / pip]:::svrprog
+    end
+
+    %% === Сам сервер с 3X-UI ===
+    subgraph SERVER["<host-alias> · 3X-UI панель"]
+
+        subgraph INBOUNDS["Inbounds (входные двери)"]
+            InCli[VLESS-inbound<br/>:&lt;inbound-port&gt;]:::inbound
+            InProxy[mixed inbound<br/>127.0.0.1:1080]:::inbound
+        end
+
+        Router{Router<br/>geoip:ru → direct<br/>остальное → upstream}:::router
+
+        subgraph OUTBOUNDS["Outbounds (выходные двери)"]
+            OutDirect[direct<br/>в интернет]:::outbound
+            OutUpstream[upstream<br/>подписка ИЛИ свой загр.VPS]:::outbound
+        end
+    end
+
+    %% === Внешнее ===
+    InternetRU([Российский интернет]):::external
+    InternetWorld([Заблокированные API<br/>Anthropic, OpenAI, GitHub]):::external
+
+    %% === Связи: клиенты ===
+    iPhone -.VLESS-link.-> InCli
+    Android -.VLESS-link.-> InCli
+    Mac -.VLESS-link.-> InCli
+
+    %% === Связи: программы на сервере (если server-proxy) ===
+    BotPy -.socks5h://127.0.0.1:1080.-> InProxy
+    CurlCli -.http_proxy env.-> InProxy
+
+    %% === Маршрутизация ===
+    InCli --> Router
+    InProxy --> Router
+
+    Router -- geoip:ru --> OutDirect
+    Router -- остальное --> OutUpstream
+
+    OutDirect --> InternetRU
+    OutUpstream --> InternetWorld
+
+    %% === Стили ===
+    classDef client fill:#bbf7d0,stroke:#16a34a,color:#000
+    classDef svrprog fill:#bfdbfe,stroke:#1d4ed8,color:#000
+    classDef inbound fill:#fce7f3,stroke:#db2777,color:#000
+    classDef outbound fill:#fef3c7,stroke:#d97706,color:#000
+    classDef router fill:#f3f4f6,stroke:#374151,color:#000
+    classDef external fill:#e8e8e8,stroke:#666,color:#000

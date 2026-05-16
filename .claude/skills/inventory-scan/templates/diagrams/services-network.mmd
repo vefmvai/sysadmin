@@ -1,0 +1,67 @@
+%% services-network.mmd — детальная карта Docker-сетей и контейнеров
+%%
+%% Показывает: какие контейнеры в каких Docker-сетях, какие порты
+%% слушают (включая bind на 127.0.0.1 vs наружу), кто к кому ходит.
+%%
+%% Заполняется скиллом /inventory-scan на основе:
+%%   - inventory/hosts/<host>/networks.md (список Docker-сетей)
+%%   - inventory/hosts/<host>/services.md (контейнеры + порты + сети)
+%%
+%% Условные обозначения:
+%%   :8080→3000   — порт на хосте → порт в контейнере
+%%   127.0.0.1:X  — bind только на localhost (за nginx)
+%%   :X (host)    — host networking
+%%   internal     — нет проброса портов, только в сети Docker
+
+flowchart TB
+    %% === Хост и его публичные порты ===
+    subgraph HOST["host · <hostname> · публичный IP <ip>"]
+
+        subgraph PUBLIC["Публичные порты (UFW allow)"]
+            Port22[":22 · SSH"]:::public
+            Port80[":80 · HTTP"]:::public
+            Port443[":443 · HTTPS"]:::public
+        end
+
+        Nginx[nginx · :80, :443]:::nginx
+
+        %% === Docker-сети ===
+        subgraph NETAPP["docker network: <apps-network>"]
+            SvcApp1[<service-1><br/>127.0.0.1:&lt;p1&gt;→&lt;ip1&gt;]:::app
+            SvcApp2[<service-2><br/>internal]:::app
+        end
+
+        subgraph NETDB["docker network: <db-network>"]
+            DBPostgres[(<postgres><br/>127.0.0.1:5432→5432)]:::db
+            DBRedis[(<redis><br/>internal)]:::db
+        end
+
+        subgraph NETMON["docker network: <monitoring-network>"]
+            MonKuma[<uptime-kuma><br/>127.0.0.1:3001→3001]:::mon
+            MonDozzle[<dozzle><br/>127.0.0.1:8080→8080]:::mon
+        end
+
+        subgraph NETVPN["docker network: <vpn-network>"]
+            VPNX[<3x-ui><br/>:&lt;panel-port&gt; (host)]:::vpn
+        end
+    end
+
+    %% === Связи ===
+    Port443 --> Nginx
+    Port80 --> Nginx
+
+    Nginx -.proxy.-> SvcApp1
+    Nginx -.proxy.-> MonKuma
+    Nginx -.proxy.-> MonDozzle
+
+    SvcApp1 --> DBPostgres
+    SvcApp1 --> DBRedis
+    SvcApp2 --> DBPostgres
+
+    %% === Стили ===
+    classDef public fill:#fee2e2,stroke:#dc2626,color:#000
+    classDef nginx fill:#f3f4f6,stroke:#6b7280,color:#000
+    classDef app fill:#bbf7d0,stroke:#16a34a,color:#000
+    classDef db fill:#fef3c7,stroke:#d97706,color:#000
+    classDef mon fill:#dbeafe,stroke:#2563eb,color:#000
+    classDef vpn fill:#fce7f3,stroke:#db2777,color:#000
