@@ -18,27 +18,18 @@
 
 set -u
 
-# Поиск конфига (если не передан аргументом — тот же алгоритм что в Cold Start персоны)
-if [ "$#" -ge 1 ]; then
-    CONFIG="$1"
-else
-    CONFIG=""
-    for candidate in \
-        "${INFRA_DIR:-/dev/null}/sysadmin-config.json" \
-        "./sysadmin-config.json" \
-        "../infra/sysadmin-config.json" \
-        "$HOME/infra/sysadmin-config.json" \
-        "$HOME/work/infra/sysadmin-config.json" \
-        "$HOME/projects/infra/sysadmin-config.json"; do
-        [ -f "$candidate" ] && { CONFIG="$candidate"; break; }
-    done
-    [ -z "$CONFIG" ] && { echo "ERROR: sysadmin-config.json не найден ни в одном стандартном месте"; exit 1; }
-fi
-
-# Схема живёт в sysadmin/ — относительно самого скрипта (он в .claude/skills/sysadmin-init/scripts/)
+# Схема живёт в sysadmin/ — путь относительно самого скрипта
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SYSADMIN_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 SCHEMA="$SYSADMIN_ROOT/sysadmin-config.schema.json"
+
+# Поиск конфига (если не передан аргументом — через общий helper _lib/find-config.sh)
+if [ "$#" -ge 1 ]; then
+    CONFIG="$1"
+else
+    source "$SYSADMIN_ROOT/.claude/skills/_lib/find-config.sh"
+    find_sysadmin_config strict   # exit 1 с понятным сообщением если не найден
+fi
 
 [ -f "$CONFIG" ] || { echo "ERROR: $CONFIG не существует"; exit 1; }
 [ -f "$SCHEMA" ] || { echo "ERROR: схема $SCHEMA не найдена (ожидалась в корне репо sysadmin/)"; exit 1; }

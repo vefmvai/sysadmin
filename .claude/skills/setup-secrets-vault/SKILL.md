@@ -77,23 +77,19 @@ esac
 
 Скилл — OPTIONAL-режим. Может вызываться **до** `/sysadmin-init` (на свежем сервере, в составе bootstrap-сценария), поэтому отсутствие конфига — нормально.
 
+Используй общий helper `_lib/find-config.sh` в режиме `silent` — отсутствие
+конфига нормально (скилл может вызываться до `/sysadmin-init` в составе
+bootstrap-сценария). `$SYSADMIN_ROOT` запоминается на Шаге 1 Cold Start.
+
 ```bash
-# Поиск sysadmin-config.json (живёт в infra/ оператора)
-# Алгоритм идентичен Cold Start Protocol персоны (references/cold-start.md)
-CONFIG=""
-for candidate in \
-    "${INFRA_DIR:-/dev/null}/sysadmin-config.json" \
-    "./sysadmin-config.json" \
-    "../infra/sysadmin-config.json" \
-    "$HOME/infra/sysadmin-config.json" \
-    "$HOME/work/infra/sysadmin-config.json" \
-    "$HOME/projects/infra/sysadmin-config.json"; do
-    [ -f "$candidate" ] && { CONFIG="$candidate"; break; }
-done
+source "$SYSADMIN_ROOT/.claude/skills/_lib/find-config.sh"
+
+# silent: без WARN, $CONFIG="" если не найден
+find_sysadmin_config silent
 
 VAULT_FROM_CONFIG=""
-if [ -n "$CONFIG" ] && [ "${FORCE:-0}" != "1" ]; then
-    VAULT_FROM_CONFIG=$(jq -r '.secrets.manager // empty' "$CONFIG")
+if [ "$SYSADMIN_CONFIG_FOUND" = "true" ] && [ "${FORCE:-0}" != "1" ]; then
+    VAULT_FROM_CONFIG=$(get_config_field secrets.manager)
 fi
 
 if [ -n "$VAULT_FROM_CONFIG" ]; then

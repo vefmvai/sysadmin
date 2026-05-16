@@ -48,36 +48,18 @@ allowed-tools: Bash, Read, Edit, Write
 
 Скилл — STRICT-режим: без `sysadmin-config.json` он не запускается. Конфиг определяет, куда складываются бэкапы (S3 / B2 / WebDAV), какая retention, нужны ли Telegram-алерты и в каком менеджере паролей искать `restic`-passphrase. Без этих решений скилл угадывал бы намерения — это запрещено правилами агента.
 
+Используй общий helper `_lib/find-config.sh` (единая точка изменения для всех
+STRICT/OPTIONAL скиллов — алгоритм идентичен Cold Start Protocol персоны).
+`$SYSADMIN_ROOT` запоминается на Шаге 1 Cold Start.
+
 ```bash
-# Поиск sysadmin-config.json (живёт в infra/ оператора)
-# Алгоритм идентичен Cold Start Protocol персоны (references/cold-start.md)
-CONFIG=""
-for candidate in \
-    "${INFRA_DIR:-/dev/null}/sysadmin-config.json" \
-    "./sysadmin-config.json" \
-    "../infra/sysadmin-config.json" \
-    "$HOME/infra/sysadmin-config.json" \
-    "$HOME/work/infra/sysadmin-config.json" \
-    "$HOME/projects/infra/sysadmin-config.json"; do
-    [ -f "$candidate" ] && { CONFIG="$candidate"; break; }
-done
+source "$SYSADMIN_ROOT/.claude/skills/_lib/find-config.sh"
 
-# 1) Конфиг обязан быть
-if [ -z "$CONFIG" ]; then
-    cat <<'EOF' >&2
-sysadmin-config.json не найден ни в одном из стандартных мест:
-  ./, ../infra/, ~/infra/, ~/work/infra/, ~/projects/infra/
-  + переменная окружения $INFRA_DIR (если задана).
+# STRICT: exit 1 с понятным сообщением если конфига нет
+find_sysadmin_config strict
 
-Без него я не знаю, куда заливать бэкапы и в каком менеджере паролей лежит passphrase.
-Запусти /sysadmin-init для первичной настройки агента — это 3-5 минут вопросов,
-после которых этот скилл заработает.
-EOF
-    exit 1
-fi
-
-# 2) Подсистема должна быть включена
-BAK_ENABLED=$(jq -r '.backups.enabled' "$CONFIG")
+# Подсистема должна быть включена
+BAK_ENABLED=$(get_config_field backups.enabled false)
 if [ "$BAK_ENABLED" != "true" ]; then
     cat <<'EOF' >&2
 В sysadmin-config.json указано backups.enabled=false — бэкапы не настраиваются.
@@ -88,23 +70,19 @@ EOF
     exit 0
 fi
 
-# 3) Чтение значений из конфига (CLI-параметры остаются как override ниже)
-BACKUP_DESTINATION_FROM_CONFIG=$(jq -r '.backups.destination' "$CONFIG")
-RCLONE_REMOTE_FROM_CONFIG=$(jq -r '.backups.rclone_remote // empty' "$CONFIG")
-RETENTION_DAYS_FROM_CONFIG=$(jq -r '.backups.retention.daily' "$CONFIG")
-RETENTION_WEEKS_FROM_CONFIG=$(jq -r '.backups.retention.weekly' "$CONFIG")
-RETENTION_MONTHS_FROM_CONFIG=$(jq -r '.backups.retention.monthly' "$CONFIG")
+# Чтение значений из конфига
+BACKUP_DESTINATION_FROM_CONFIG=$(get_config_field backups.destination)
+RCLONE_REMOTE_FROM_CONFIG=$(get_config_field backups.rclone_remote)
+RETENTION_DAYS_FROM_CONFIG=$(get_config_field backups.retention.daily 7)
+RETENTION_WEEKS_FROM_CONFIG=$(get_config_field backups.retention.weekly 4)
+RETENTION_MONTHS_FROM_CONFIG=$(get_config_field backups.retention.monthly 6)
 
 # Telegram — есть/нет
-TG_ENABLED=$(jq -r '.notifications.telegram.enabled // false' "$CONFIG")
-if [ "$TG_ENABLED" = "true" ]; then
-    ALERT_CHANNEL_FROM_CONFIG="telegram"
-else
-    ALERT_CHANNEL_FROM_CONFIG=""
-fi
+TG_ENABLED=$(get_config_field notifications.telegram.enabled false)
+[ "$TG_ENABLED" = "true" ] && ALERT_CHANNEL_FROM_CONFIG="telegram" || ALERT_CHANNEL_FROM_CONFIG=""
 
 # Менеджер паролей → конвенция индекса для restic-passphrase
-SECRETS_MANAGER=$(jq -r '.secrets.manager' "$CONFIG")
+SECRETS_MANAGER=$(get_config_field secrets.manager keychain)
 case "$SECRETS_MANAGER" in
     keychain)   BACKUP_PASS_REF_FROM_CONFIG="keychain://infra/restic-passphrase" ;;
     pass)       BACKUP_PASS_REF_FROM_CONFIG="pass:infra/restic-passphrase" ;;
@@ -113,7 +91,7 @@ case "$SECRETS_MANAGER" in
     *) BACKUP_PASS_REF_FROM_CONFIG="" ;;
 esac
 
-# 4) CLI-override > конфиг (для отладочных прогонов и edge cases)
+# CLI-override > конфиг (для отладочных прогонов и edge cases)
 BACKUP_DESTINATION="${BACKUP_DESTINATION:-$BACKUP_DESTINATION_FROM_CONFIG}"
 RCLONE_REMOTE="${RCLONE_REMOTE:-$RCLONE_REMOTE_FROM_CONFIG}"
 RETENTION_DAYS="${RETENTION_DAYS:-$RETENTION_DAYS_FROM_CONFIG}"

@@ -81,51 +81,24 @@ allowed-tools: Bash, Read, Edit, Write
 `scripts/01-preflight.sh`, чтобы при отсутствии конфига оператор получил
 понятную ошибку, а не падение на середине процедуры.
 
+Используй общий helper `_lib/find-config.sh` (единая точка изменения для всех
+STRICT/OPTIONAL скиллов — алгоритм идентичен Cold Start Protocol персоны).
+`$SYSADMIN_ROOT` запоминается на Шаге 1 Cold Start.
+
 ```bash
-# Поиск sysadmin-config.json (живёт в infra/ оператора)
-# Алгоритм идентичен Cold Start Protocol персоны (references/cold-start.md)
-CONFIG=""
-for candidate in \
-    "${INFRA_DIR:-/dev/null}/sysadmin-config.json" \
-    "./sysadmin-config.json" \
-    "../infra/sysadmin-config.json" \
-    "$HOME/infra/sysadmin-config.json" \
-    "$HOME/work/infra/sysadmin-config.json" \
-    "$HOME/projects/infra/sysadmin-config.json"; do
-    [ -f "$candidate" ] && { CONFIG="$candidate"; break; }
-done
+source "$SYSADMIN_ROOT/.claude/skills/_lib/find-config.sh"
 
-# 1) Конфиг обязан быть
-if [ -z "$CONFIG" ]; then
-    cat <<'EOF' >&2
-sysadmin-config.json не найден ни в одном из стандартных мест:
-  ./, ../infra/, ~/infra/, ~/work/infra/, ~/projects/infra/
-  + переменная окружения $INFRA_DIR (если задана).
+# STRICT: exit 1 если конфига нет
+find_sysadmin_config strict
 
-Без него я не знаю, в каком менеджере паролей сохранять креды панели
-3X-UI (логин/пароль/URL).
-Запусти /sysadmin-init для первичной настройки агента — это 3-5 минут вопросов,
-после которых этот скилл будет знать всё необходимое.
-EOF
-    exit 1
-fi
+# secrets.manager обязателен — без него непонятно, куда сохранять креды панели
+require_config_field "secrets.manager" \
+    "Запусти /sysadmin-init --reconfigure и укажи менеджер паролей (keychain / pass / bw / op)."
 
-# 2) secrets.manager должен быть задан
-SECRETS_MANAGER=$(jq -r '.secrets.manager // empty' "$CONFIG")
-if [ -z "$SECRETS_MANAGER" ] || [ "$SECRETS_MANAGER" = "null" ]; then
-    cat <<EOF >&2
-В $CONFIG нет поля secrets.manager — не знаю, куда сохранять креды панели
-3X-UI (логин/пароль/URL).
-
-Запусти /sysadmin-init --reconfigure и укажи менеджер паролей
-(keychain / pass / bw / op).
-EOF
-    exit 1
-fi
-
-# 3) Чтение серверного контекста (для inventory)
-SERVER_ALIAS_FROM_CONFIG=$(jq -r '.servers[0].alias // empty' "$CONFIG")
-REPORT_LANGUAGE=$(jq -r '.language // "ru"' "$CONFIG")
+# Чтение значений
+SECRETS_MANAGER=$(get_config_field secrets.manager)
+SERVER_ALIAS_FROM_CONFIG=$(get_config_field 'servers[0].alias')
+REPORT_LANGUAGE=$(get_config_field language ru)
 ```
 
 После успешного чтения переходим к Шагу 0 (Pre-check на сервере).

@@ -81,32 +81,34 @@ allowed-tools: AskUserQuestion, Bash, Read, Write, Edit
 3. Типичные пути: `~/infra/`, `~/work/infra/`, `~/projects/infra/`.
 4. Если не нашёл — спрашиваю оператора путь к `infra/` (это будет первый вопрос).
 
-```bash
-# 0. Найти конфиг (или зафиксировать что его нет)
-CONFIG_PATH=""
-for candidate in \
-    "./sysadmin-config.json" \
-    "../infra/sysadmin-config.json" \
-    "$HOME/infra/sysadmin-config.json" \
-    "$HOME/work/infra/sysadmin-config.json" \
-    "$HOME/projects/infra/sysadmin-config.json"; do
-    if [ -f "$candidate" ]; then
-        CONFIG_PATH="$candidate"
-        break
-    fi
-done
+Используй общий helper `_lib/find-config.sh` в режиме `silent` — при первичной
+установке конфига нет, это нормально. `$SYSADMIN_ROOT` запоминается на
+Шаге 1 Cold Start (либо равен `$(pwd)` если /sysadmin-init вызвали из самого репо).
 
-# 1. Конфиг уже есть?
+```bash
+# Определяем SYSADMIN_ROOT, если не задан (первичный запуск без полной Cold Start)
+if [ -z "$SYSADMIN_ROOT" ]; then
+    SYSADMIN_ROOT="$(cd "$(dirname "$0")/../../.." 2>/dev/null && pwd)"
+    [ -f "$SYSADMIN_ROOT/.claude/agents/sysadmin.md" ] || \
+        SYSADMIN_ROOT="$(grep -oE '`/[^`]+sysadmin/?`' ~/.claude/agents/sysadmin.md 2>/dev/null \
+            | head -1 | sed 's|`||g; s|/$||')"
+fi
+
+source "$SYSADMIN_ROOT/.claude/skills/_lib/find-config.sh"
+
+# silent: $CONFIG="" если не найден (нормально для первичного setup)
+find_sysadmin_config silent
+CONFIG_PATH="$CONFIG"
 [ -n "$CONFIG_PATH" ] && CONFIG_EXISTS=true || CONFIG_EXISTS=false
 
-# 2. Какой режим? Идемпотентный выход без правок.
+# Идемпотентный выход без правок
 if [ "$CONFIG_EXISTS" = "true" ] && [ "$ARG" != "--reconfigure" ]; then
     echo "Уже настроено: cat \"$CONFIG_PATH\" (см. поля version/language/servers)."
     echo "Для перенастройки запусти /sysadmin-init --reconfigure"
     exit 0
 fi
 
-# 3. Зависимости
+# Зависимости
 command -v jq >/dev/null || {
     echo "Нужен jq. Установи: brew install jq (macOS) или apt-get install jq (Linux)"
     exit 1
@@ -114,8 +116,8 @@ command -v jq >/dev/null || {
 command -v check-jsonschema >/dev/null \
   || echo "WARN: check-jsonschema не установлен. Будет fallback-валидация на jq."
 
-# 4. Автодетект инфраструктуры (один JSON со всеми defaults)
-bash .claude/skills/sysadmin-init/scripts/detect-defaults.sh > /tmp/sysadmin-defaults.json
+# Автодетект инфраструктуры (один JSON со всеми defaults)
+bash "$SYSADMIN_ROOT/.claude/skills/sysadmin-init/scripts/detect-defaults.sh" > /tmp/sysadmin-defaults.json
 # Содержимое: { "ssh_aliases": [...], "os": "Darwin", "docker": true, "jq_version": "1.7", ... }
 ```
 

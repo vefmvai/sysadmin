@@ -45,36 +45,18 @@ allowed-tools: Bash, Read, Edit, Write
 
 Скилл — STRICT-режим: без `sysadmin-config.json` он не запускается. Конфиг определяет, что именно ставить (стек, домен, Telegram), и явно фиксирует «оператор хочет мониторинг». Без этого решения скилл угадывал бы намерения — это запрещено правилами агента.
 
+Используй общий helper `_lib/find-config.sh` (единая точка изменения для всех
+STRICT/OPTIONAL скиллов — алгоритм идентичен Cold Start Protocol персоны).
+`$SYSADMIN_ROOT` запоминается на Шаге 1 Cold Start (ссылается на корень `sysadmin/` репо).
+
 ```bash
-# Поиск sysadmin-config.json (живёт в infra/ оператора)
-# Алгоритм идентичен Cold Start Protocol персоны (references/cold-start.md)
-CONFIG=""
-for candidate in \
-    "${INFRA_DIR:-/dev/null}/sysadmin-config.json" \
-    "./sysadmin-config.json" \
-    "../infra/sysadmin-config.json" \
-    "$HOME/infra/sysadmin-config.json" \
-    "$HOME/work/infra/sysadmin-config.json" \
-    "$HOME/projects/infra/sysadmin-config.json"; do
-    [ -f "$candidate" ] && { CONFIG="$candidate"; break; }
-done
+source "$SYSADMIN_ROOT/.claude/skills/_lib/find-config.sh"
 
-# 1) Конфиг обязан быть
-if [ -z "$CONFIG" ]; then
-    cat <<'EOF' >&2
-sysadmin-config.json не найден ни в одном из стандартных мест:
-  ./, ../infra/, ~/infra/, ~/work/infra/, ~/projects/infra/
-  + переменная окружения $INFRA_DIR (если задана).
+# STRICT: exit 1 с понятным сообщением если конфига нет
+find_sysadmin_config strict
 
-Без него я не знаю, какой стек разворачивать, на каком поддомене и куда слать алерты.
-Запусти /sysadmin-init для первичной настройки агента — это 3-5 минут вопросов,
-после которых этот скилл будет знать что включать.
-EOF
-    exit 1
-fi
-
-# 2) Подсистема должна быть включена
-MON_ENABLED=$(jq -r '.monitoring.enabled' "$CONFIG")
+# Подсистема должна быть включена
+MON_ENABLED=$(get_config_field monitoring.enabled false)
 if [ "$MON_ENABLED" != "true" ]; then
     cat <<'EOF' >&2
 В sysadmin-config.json указано monitoring.enabled=false — мониторинг не нужен.
@@ -85,21 +67,20 @@ EOF
     exit 0
 fi
 
-# 3) Чтение значений из конфига (CLI-параметры остаются как override ниже)
+# Чтение значений из конфига
 COMPONENTS_FROM_CONFIG=$(jq -r '.monitoring.stack | join(",")' "$CONFIG")
-DOMAIN_FROM_CONFIG=$(jq -r '.monitoring.panel_domain // .servers[0].domain // empty' "$CONFIG")
+DOMAIN_FROM_CONFIG=$(get_config_field monitoring.panel_domain)
+[ -z "$DOMAIN_FROM_CONFIG" ] && DOMAIN_FROM_CONFIG=$(get_config_field 'servers[0].domain')
 
-TG_ENABLED=$(jq -r '.notifications.telegram.enabled // false' "$CONFIG")
-TG_BOT_FROM_CONFIG=""
+TG_ENABLED=$(get_config_field notifications.telegram.enabled false)
 if [ "$TG_ENABLED" = "true" ]; then
-    TG_BOT_FROM_CONFIG=$(jq -r '.notifications.telegram.bot_username // empty' "$CONFIG")
     # Сам токен бота читается из менеджера паролей оператора по индексу
     # (поле secrets.manager в конфиге + конвенция "infra/<bot>/token").
     # Конфиг хранит ИНДЕКС, не значение секрета.
     COMPONENTS_FROM_CONFIG="${COMPONENTS_FROM_CONFIG},telegram"
 fi
 
-# 4) CLI-override > конфиг (для отладочных прогонов)
+# CLI-override > конфиг (для отладочных прогонов)
 COMPONENTS="${COMPONENTS:-$COMPONENTS_FROM_CONFIG}"
 DOMAIN="${DOMAIN:-$DOMAIN_FROM_CONFIG}"
 ```

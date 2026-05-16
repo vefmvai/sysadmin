@@ -50,36 +50,26 @@ allowed-tools: Bash, Read
 - `secrets.manager` → рекомендации по `.env` конкретизированы под выбранный менеджер;
 - `servers[0].ssh_alias` → значение `SERVER`, если CLI не задан.
 
+Используй общий helper `_lib/find-config.sh` (единая точка изменения для
+всех STRICT/OPTIONAL скиллов — алгоритм идентичен Cold Start Protocol персоны).
+`$SYSADMIN_ROOT` — путь к sysadmin/ репо, известен по bridge-файлу
+`~/.claude/agents/sysadmin.md` (читал на Cold Start).
+
 ```bash
-# Поиск sysadmin-config.json (живёт в infra/ оператора)
-# Алгоритм идентичен Cold Start Protocol персоны (references/cold-start.md)
-CONFIG=""
-for candidate in \
-    "${INFRA_DIR:-/dev/null}/sysadmin-config.json" \
-    "./sysadmin-config.json" \
-    "../infra/sysadmin-config.json" \
-    "$HOME/infra/sysadmin-config.json" \
-    "$HOME/work/infra/sysadmin-config.json" \
-    "$HOME/projects/infra/sysadmin-config.json"; do
-    [ -f "$candidate" ] && { CONFIG="$candidate"; break; }
-done
+source "$SYSADMIN_ROOT/.claude/skills/_lib/find-config.sh"
 
-if [ -n "$CONFIG" ]; then
-    REPORT_LANGUAGE_FROM_CONFIG=$(jq -r '.language // "ru"' "$CONFIG")
-    SERVER_FROM_CONFIG=$(jq -r '.servers[0].ssh_alias // empty' "$CONFIG")
-    SECRETS_MANAGER_FROM_CONFIG=$(jq -r '.secrets.manager // empty' "$CONFIG")
-else
-    REPORT_LANGUAGE_FROM_CONFIG="ru"
-    SERVER_FROM_CONFIG=""
-    SECRETS_MANAGER_FROM_CONFIG=""
-    echo "WARN: sysadmin-config.json не найден ни в одном из стандартных мест." >&2
-    echo "      Использую defaults (язык=ru). Для точности — запусти /sysadmin-init." >&2
-fi
+find_sysadmin_config optional   # OPTIONAL: defaults + WARN если не найден
 
-# CLI-override > конфиг
-REPORT_LANGUAGE="${REPORT_LANGUAGE:-$REPORT_LANGUAGE_FROM_CONFIG}"
-SERVER="${SERVER:-$SERVER_FROM_CONFIG}"
-SECRETS_MANAGER="${SECRETS_MANAGER:-$SECRETS_MANAGER_FROM_CONFIG}"
+# CLI-override > конфиг > дефолт
+REPORT_LANGUAGE="${REPORT_LANGUAGE:-$(get_config_field language ru)}"
+SERVER="${SERVER:-$(get_config_field 'servers[0].ssh_alias')}"
+SECRETS_MANAGER="${SECRETS_MANAGER:-$(get_config_field secrets.manager)}"
+```
+
+Если по какой-то причине `$SYSADMIN_ROOT` не задан — извлеки его из bridge-файла:
+```bash
+SYSADMIN_ROOT=$(grep -oE '`/[^`]+sysadmin/?`' ~/.claude/agents/sysadmin.md \
+    | head -1 | sed 's|`||g; s|/$||')
 ```
 
 **Важно:** скилл остаётся **read-only**, конфиг ничего не правит и не диктует поведение проверок — только язык отчёта, ssh-таргет и формулировки рекомендаций по `.env`-файлам. Без конфига всё работает как раньше (с предупреждением).
