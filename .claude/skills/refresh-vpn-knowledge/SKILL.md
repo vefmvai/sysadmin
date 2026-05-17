@@ -2,10 +2,13 @@
 name: refresh-vpn-knowledge
 description: |
   Актуализация VPN-knowledge базы (`.claude/knowledge/networking/`) когда
-  её содержимое старше TTL (по умолчанию 30 дней). Сценарий: блокировки и
-  TSPU-сигнатуры в РФ меняются быстро, выходят новые версии клиентов sing-box/
-  Hiddify/Karing, появляются issues в 3X-UI — без актуализации агент работает
-  с устаревшей картой и рекомендует уже сломанное.
+  её содержимое старше TTL. База разделена на 3 слоя с разными TTL (ADR-0006):
+  `_live/` (TTL 14 дней — фронт борьбы по странам), `_reference/` (TTL 60 дней —
+  устройство протоколов/клиентов/панели/транспортов/fronting), `_meta/` (TTL 365
+  дней — реестр источников, глоссарий, конфликты).
+  Сценарий: блокировки и TSPU-сигнатуры в РФ меняются ежедневно, выходят новые
+  версии клиентов sing-box/Hiddify/Karing, появляются issues в 3X-UI — без
+  актуализации агент работает с устаревшей картой и рекомендует уже сломанное.
   Процесс: проверка frontmatter → WebSearch по фиксированным sources_checked →
   Tavily research по выявленным изменениям → дифф старого и нового → Yellow Zone
   подтверждение → переписывание разделов + обновление last_researched.
@@ -31,11 +34,17 @@ allowed-tools: Bash, Read, Edit, Write, WebSearch, WebFetch
 
 <context>
 Что предполагается:
-- VPN-knowledge живёт в `.claude/knowledge/networking/` (4 файла: vpn-protocols.md,
-  3x-ui-panel.md, 3x-ui-api.md, client-apps.md).
-- Каждый файл имеет frontmatter с полями `knowledge_domain: vpn`, `last_researched`,
-  `ttl_days`, `sources_checked` (см. helper `_lib/check-knowledge-freshness.sh`).
-- Tavily MCP-сервер настроен (1000 запросов/мес бесплатно), WebSearch встроен.
+- VPN-knowledge живёт в `.claude/knowledge/networking/` в трёх слоях (ADR-0006):
+  - `_live/` — frontline-{ru,cn,ir,by}.md + timeline.md (TTL 14 дней)
+  - `_reference/` — vpn-protocols.md, transports.md, fronting-strategies.md,
+    3x-ui-panel.md, 3x-ui-api.md, client-apps.md (TTL 60 дней)
+  - `_meta/` — sources-registry.md, glossary.md, conflicts.md (TTL 365 дней)
+- Каждый файл имеет frontmatter с полями `knowledge_domain: vpn`, `layer`,
+  `last_researched`, `ttl_days`, `sources_checked` (см. helper
+  `_lib/check-knowledge-freshness.sh`).
+- Tavily — 9 ключей с авто-ротацией через `~/.local/bin/tavily-search.sh` и
+  `tavily-extract.sh` (curl напрямую к API, при quota_exceeded — следующий ключ).
+  Конфиг ключей: `~/.config/tavily-keys.json`. WebSearch встроен как fallback.
 - Интернет на машине оператора работает (это локальный скилл, не серверный).
 
 Что НЕ предполагается:
@@ -56,12 +65,18 @@ allowed-tools: Bash, Read, Edit, Write, WebSearch, WebFetch
 </goals>
 
 <parameters>
+- `LAYER` — какой слой актуализировать (default: `live` — потому что чаще всего нужен):
+  - `live` — `_live/frontline-*.md` и `_live/timeline.md` (TTL 14 дней, чаще всего)
+  - `reference` — `_reference/*.md` (TTL 60 дней, реже)
+  - `meta` — `_meta/*.md` (TTL 365 дней, почти никогда)
+  - `all` — все слои подряд
 - `DOMAIN` — какой knowledge-домен актуализировать (default: `vpn`).
 - `FILES` — конкретные файлы через запятую, для точечной актуализации
-  (default: все просроченные в домене).
+  (default: все просроченные в домене + слое).
 - `MODE` — `check` (только показать что устарело, не лезть в сеть) /
   `full` (полный цикл с WebSearch+Tavily) (default: `full`).
-- `TAVILY_BUDGET` — сколько Tavily-запросов максимум (default: 5 — экономим лимит).
+- `TAVILY_BUDGET` — сколько Tavily-запросов максимум (default: 25 для LAYER=live,
+  30 для LAYER=reference, 0 для LAYER=meta — почти не нужен).
 - `AUTO_REFRESH_DATES` — если `true`, для файлов где оператор сказал «всё актуально,
   ничего не меняем», обновить только `last_researched` без правок текста (default: `true`).
 </parameters>
@@ -81,17 +96,23 @@ SYSADMIN_ROOT=$(grep -oE '`/[^`]+sysadmin/?`' ~/.claude/agents/sysadmin.md 2>/de
 STALE=$(bash "$SYSADMIN_ROOT/.claude/skills/_lib/check-knowledge-freshness.sh" \
     "${DOMAIN:-vpn}" --json --stale-only)
 
+# Фильтр по LAYER (default: live — самый частый сценарий)
+LAYER="${LAYER:-live}"
+if [ "$LAYER" != "all" ]; then
+    STALE=$(echo "$STALE" | jq --arg L "_${LAYER}/" '[.[] | select(.file | contains($L))]')
+fi
+
 STALE_COUNT=$(echo "$STALE" | jq 'length')
 ```
 
 **Если `STALE_COUNT=0`** — выводим оператору одну строку и выходим:
-> «Все VPN-knowledge файлы в актуальном TTL (30 дней). Проверять нечего.»
+> «Все VPN-knowledge файлы в слое `_${LAYER}/` в актуальном TTL. Проверять нечего.»
 
-**Если есть просроченные** — показываем список:
+**Если есть просроченные** — показываем список (с указанием слоя):
 ```
-Просроченные VPN-knowledge:
-  ⚠️  client-apps.md      — last_researched 2026-04-01 (45 дней, TTL 30)
-  ⚠️  vpn-protocols.md    — last_researched 2026-03-20 (57 дней, TTL 30)
+Просроченные VPN-knowledge (LAYER=live):
+  ⚠️  _live/frontline-ru.md — last_researched 2026-05-01 (16 дней, TTL 14)
+  ⚠️  _live/timeline.md     — last_researched 2026-04-30 (17 дней, TTL 14)
 ```
 
 Если `MODE=check` — на этом останавливаемся. Иначе переходим к Шагу 1.
@@ -126,11 +147,30 @@ STALE_COUNT=$(echo "$STALE" | jq 'length')
    SOURCES=$(awk '/^---$/{c++; next} c==1 && /^  - /{sub("^  - ", ""); print}' "$FILE" | head -10)
    ```
 
-2. Для каждого URL — WebSearch с запросом контекста файла:
-   - vpn-protocols.md: `"Russia VPN blocks TSPU 2026" + "Reality protocol blocked"`
-   - client-apps.md: `"sing-box iOS client 2026" + "Hiddify release notes"`
-   - 3x-ui-panel.md: `"3x-ui release 2026 changelog" + "MHSanaei issues open"`
-   - 3x-ui-api.md: `"3x-ui API breaking change 2026"`
+2. Для каждого URL — WebSearch с запросом контекста файла. Источники
+   разделены по слоям:
+
+   **`_live/` слой** (ежедневное состояние блокировок):
+   - frontline-ru.md: `site:ntc.party 2026 Russia VPN` + `site:gfw.report Russia`
+     + `site:blog.cloudflare.com Russia` + Mediazona/Meduza/Moscow Times последние недели
+   - frontline-cn.md: `site:gfw.report 2026` + greatfirewallguide.com + USENIX
+   - frontline-ir.md: arxiv preprints + Iran censorship reports 2026
+   - frontline-by.md: Carnegie + RFE/RL + CSO Meter Belarus 2026
+   - timeline.md: добавляются новые события из всех frontline-*
+
+   **`_reference/` слой** (устройство мира — реже меняется):
+   - vpn-protocols.md: `XTLS/Xray-core releases` + `SagerNet/sing-box releases`
+     + `MHSanaei/3x-ui releases`
+   - transports.md: новые transport-фичи в release notes XTLS/sing-box
+   - fronting-strategies.md: Cloudflare blog + новые CDN-fronting туториалы
+   - client-apps.md: `sing-box iOS client release` + `Hiddify release notes` +
+     `Karing release` + App Store removals
+   - 3x-ui-panel.md, 3x-ui-api.md: MHSanaei/3x-ui issues/releases
+
+   **`_meta/` слой** (стабильное, обновляется по запросу):
+   - sources-registry.md: добавление/удаление источников по факту
+   - glossary.md: новые термины (XHTTP, AnyTLS, и т.д.)
+   - conflicts.md: разрешение старых конфликтов
 
 3. Собираю результаты в один JSON-документ:
    ```json
@@ -146,20 +186,30 @@ STALE_COUNT=$(echo "$STALE" | jq 'length')
 4. Если по файлу findings пуст — **этот файл актуален**, переходим к Шагу 5
    (обновление только `last_researched`).
 
-## Шаг 3: Tavily research (по бюджету)
+## Шаг 3: Tavily search/research (по бюджету)
 
-Только для файлов, где WebSearch нашёл изменения, делаю глубокий research через
-`mcp__tavily__tavily_research`:
+Только для файлов, где WebSearch нашёл изменения, делаю глубокий поиск.
+
+**Приоритет инструментов** (для экономии quota):
+1. **`~/.local/bin/tavily-search.sh "query" advanced 8`** (curl-обёртка с
+   ротацией 9 ключей) — обычные поиски, **default**
+2. **`~/.local/bin/tavily-extract.sh "https://url"`** — извлечение конкретной
+   страницы (тот же ротатор)
+3. **`mcp__tavily__tavily_search`** (basic depth) — если curl недоступен
+4. **`mcp__tavily__tavily_research`** (pro depth) — **только** для глубоких
+   синтезов; имеет отдельный жёсткий лимит, не использовать на простых
+   проверках актуальности
+5. WebSearch + WebFetch — fallback при полном исчерпании Tavily
+
+**Бюджет жёсткий**: не более `$TAVILY_BUDGET` запросов за весь прогон скилла.
+По умолчанию для `LAYER=live` — 25, для `LAYER=reference` — 30, для
+`LAYER=meta` — 0. При исчерпании — fallback на WebSearch.
 
 ```
-Q: "Что изменилось в реальности блокировок РФ VPN с 2026-05-15 по сегодня?
-    Особенно интересуют: Reality protocol, sing-box iOS, TSPU сигнатуры,
-    блокировки конкретных провайдеров."
+Пример Tavily-запроса для _live/frontline-ru.md:
+"Russia VPN blocking status May 2026 latest TSPU signatures
+new blocks since 2026-05-01 mobile operators differences"
 ```
-
-Tavily возвращает структурированный синтез с цитатами. **Бюджет жёсткий**:
-не более `$TAVILY_BUDGET` запросов за весь прогон скилла. Если бюджет исчерпан
-— переключаюсь обратно на WebSearch+WebFetch (бесплатно, но менее глубоко).
 
 ## Шаг 4: Дифф и подтверждение (Yellow Zone)
 
@@ -202,17 +252,22 @@ sed -i.bak -E "s/^last_researched:.*/last_researched: $TODAY/" "$FILE"
 rm -f "${FILE}.bak"
 ```
 
-## Шаг 6: Если найден критический сдвиг — ADR
+## Шаг 6: Если найден критический сдвиг — действия по слою
 
-Если в Tavily-research найдено **breaking change** (примеры: «Reality официально
-сломан в РФ», «sing-box-vt удалён из App Store», «новый эталонный клиент
-вытесняет sing-box»), предлагаю оператору:
+**Поведение зависит от слоя:**
 
-> «Я обнаружил критическое изменение: <описание>. Это влияет на наш ADR-0005
-> "VPN-архитектура". Хочешь, создам новый ADR в `$INFRA/decisions/` с обоснованием
-> миграции на <новое решение>?»
+- **`_live/`** — ADR обычно НЕ нужен (фронт меняется быстро, ADR создаст шум).
+  Просто добавить запись в `_live/timeline.md` и обновить соответствующий
+  `_live/frontline-*.md`. timeline.md — append-only, не правим старое.
 
-ADR пишется по шаблону `decisions/0000-template.md` приватной `infra/` оператора.
+- **`_reference/`** — да, ADR если breaking change архитектурного уровня
+  (примеры: «Reality официально сломан в РФ», «sing-box-vt удалён из App Store»,
+  «новый эталонный клиент вытесняет sing-box»). Шаблон —
+  `decisions/0000-template.md` в публичном репо или `$INFRA/decisions/` приватной
+  `infra/`.
+
+- **`_meta/`** — обновление через сам файл (`conflicts.md` для расхождений,
+  `sources-registry.md` для новых источников), без ADR.
 
 ## Шаг 7: Краткий отчёт
 
