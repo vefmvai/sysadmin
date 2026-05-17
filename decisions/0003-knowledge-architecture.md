@@ -189,6 +189,9 @@
 - ADR-0001 (канон скилла) — определяет `references/` внутри скилла.
 - ADR-0002 (канон персоны) — определяет `agents/references/`.
 - ADR-0004 (формат evaluations) — отдельный артефакт, не относится к знаниям.
+- **ADR-0006 (слоистый VPN-knowledge)** — расширение этого ADR в части
+  networking-домена. Вводит подпапки `_live/_reference/_meta/` с разными TTL
+  (14/60/365 дней) и поле `layer` во frontmatter.
 - внешнее ТЗ о добавлении VPN-блока проекта — первый реальный потребитель `.claude/knowledge/networking/`.
 - `AUDIT-METHODOLOGY.md` — точка роста про прогрессивное раскрытие персоны.
 - Методички Anthropic 03 (прогрессивное раскрытие), 07 (context engineering).
