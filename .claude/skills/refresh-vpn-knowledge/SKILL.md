@@ -143,7 +143,7 @@ STALE_COUNT=$(echo "$STALE" | jq 'length')
 
 1. Извлекаю `sources_checked` из frontmatter:
    ```bash
-   FILE=".claude/knowledge/networking/vpn-protocols.md"
+   FILE=".claude/knowledge/networking/_reference/vpn-protocols.md"  # пример (любой слой)
    SOURCES=$(awk '/^---$/{c++; next} c==1 && /^  - /{sub("^  - ", ""); print}' "$FILE" | head -10)
    ```
 
