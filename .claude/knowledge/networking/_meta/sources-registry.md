@@ -119,3 +119,15 @@ sources_checked:
 | Дата | Источник | Действие | Причина |
 |---|---|---|---|
 | 2026-05-16 | Базовый реестр заполнен | — | Этап 0 плана cached-dancing-sunrise |
+| 2026-05-17 | https://en.zona.media (Mediazona EN) | Добавлен в HIGH | Журналистика с источниками по VPN-блокировкам РФ-2026 |
+| 2026-05-17 | https://meduza.io | Добавлен в HIGH | Independent investigation с named источниками (Минцифры, РКН) |
+| 2026-05-17 | https://themoscowtimes.com | Добавлен в HIGH | Independent journalism, конкретные даты shutdowns |
+| 2026-05-17 | https://habr.com (с замерами и URL источников) | Подтверждён MEDIUM | Российский tech-комьюнити, отдельные статьи разного качества — оценивать индивидуально |
+| 2026-05-17 | https://ridl.io | Добавлен в MEDIUM | Analytical commentary на РФ-политику; нужна корроборация |
+| 2026-05-17 | https://jamestown.org | Добавлен в MEDIUM | Прогнозный анализ; нужна корроборация фактов |
+| 2026-05-17 | https://osw.waw.pl | Добавлен в HIGH | Centre for Eastern Studies (Warsaw), academic |
+| 2026-05-17 | https://podkop.net | Добавлен в MEDIUM | Технический блог по proxy-инструментам, конкретные feature-сравнения |
+| 2026-05-17 | https://hysteria.network/docs | Добавлен в HIGH | Официальная документация apernet/hysteria |
+| 2026-05-17 | https://shadowsocks.org/doc/sip022.html | Добавлен в HIGH | Официальная спецификация SS2022 |
+| 2026-05-17 | https://github.com/Shadowsocks-NET/shadowsocks-specs | Добавлен в HIGH | Spec-репозиторий SS-сообщества |
+| 2026-05-17 | https://nvovpn.com, https://fexyn.com, https://relyvpn.com, https://russiable.com | Помечены LOW | Коммерческие VPN-обзоры с conflict of interest |

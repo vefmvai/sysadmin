@@ -1,7 +1,7 @@
 ---
 knowledge_domain: vpn
 layer: reference
-last_researched: 2026-05-15
+last_researched: 2026-05-17
 ttl_days: 60
 sources_checked:
   - https://github.com/XTLS/REALITY
@@ -122,6 +122,14 @@ sources_checked:
 изнутри уже работающего VPN (для второго уровня обфускации), но не как
 первичный inbound.
 
+> ⚠️ **Обновление 2026-05-17.** SS2022 (SIP022) с BLAKE3 KDF и обязательным
+> тайминг-нейтральным закрытием при decryption-ошибках — устойчивее к active
+> probing, чем classic SS (см. `_reference/transports.md` §11). Парадокс:
+> комьюнити часто называет SS «мёртвым», но как **outbound DC-to-DC**
+> (RU-VPS → загр-SS-сервер) он работает — трансграничный B2B-трафик режется
+> ТСПУ мягче, чем клиент→загр. Зафиксировано в `_meta/conflicts.md` как
+> расхождение между HIGH-источниками (Banzaev) и наблюдаемой практикой.
+
 ### 1.5 VMess
 
 | Параметр | Значение |
@@ -189,6 +197,16 @@ sources_checked:
   Reality достаточно.
 
 **Уязвимости при неправильной настройке — см. §6 «Антипаттерны».**
+
+> ⚠️ **Обновление 2026-05-17.** Reality критично НЕ использовать с
+> serverName=cloudflare.com или другими CF-доменами в РФ: с 9 июня 2025
+> действует **16-KB curtain** к Cloudflare-инфраструктуре (после ~16 KB
+> соединение reset). Handshake может пройти, но downlink дросселируется.
+> Текущие рекомендованные donor-сайты: `www.microsoft.com` (с 2022 без CDN
+> в РФ), `github.com`. Полный разбор — `_reference/transports.md` §13.
+>
+> Также: `chrome_pq` fingerprint **не работает** с VLESS+XTLS-REALITY
+> (sing-box #2084, Xray-core #4852). Использовать `chrome`, `firefox`, `edge`.
 
 ### 1.8 Hysteria 2 и TUIC
 
@@ -276,6 +294,11 @@ Yandex-сервисы, Ozon/Wildberries/Avito, банки и телеком-оп
 - **Российские VPS-провайдеры внутри РФ** — конечно работают. Но: ходить
   из РФ-VPS к Anthropic/OpenAI напрямую блокируется на стороне API
   (геолокация). Решение — multi-hop (см. §4).
+
+> ⚠️ **Обновление 2026-05-17.** Этот раздел даёт общую картину; **актуальную
+> ежедневную картину фронта РФ см. в `_live/frontline-ru.md`** (TTL 14 дней).
+> Свежие удары и хронология — `_live/timeline.md`. Технологии транспортов
+> (XHTTP, Hysteria2, SS2022 детальный разбор) — `_reference/transports.md`.
 
 > ⚠️ **Свежесть информации.** Раздел §3 актуален на `last_verified: 2026-05-15`.
 > Эволюция блокировок РФ — недели-месяцы, не годы. При работе со старше чем
