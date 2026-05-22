@@ -42,6 +42,11 @@
 | `3x-ui-panel.md` | Архитектура эталонной панели MHSanaei/3x-ui, файловая раскладка, CLI, TLS, грабли |
 | `3x-ui-api.md` | REST API панели 3X-UI: cheatsheet curl-команд для скиллов |
 | `client-apps.md` | Карта клиентов sing-box/xray на 6 платформах, iOS-специфика |
+| `vpn-consultation-flow.md` | Сценарий VPN-консультации (hub): interview, выбор протокола, TUN, FAQ, чек-лист |
+| `routing-server-3xui.md` | **Маршрутизация на сервере (дефолт)** — split РФ/foreign/block в 3X-UI, Xray-синтаксис |
+| `routing-on-device-singbox.md` | Маршрутизация на устройстве через sing-box (энтузиасты): раскол ядра 1.11↔1.12, клиенты |
+| `routing-on-device-xray.md` | Маршрутизация на устройстве через Xray в терминале (энтузиасты-десктоп) |
+| `xray-mac-chain.md` | Xray chain (VLESS→VLESS) на Mac для Claude Code: proxy-only bypass WL |
 
 ### `_meta/` — мета-слой (TTL 365 дней)
 

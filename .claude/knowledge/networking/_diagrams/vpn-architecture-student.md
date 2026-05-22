@@ -1,47 +1,57 @@
 # Эталонная VPN-архитектура для ученика курса
 
-Схема «включил и забыл» — один тумблер в Hiddify, дальше всё работает само.
+Схема «включил и забыл» — один тумблер в клиенте, дальше всё работает само.
+Вся маршрутизация (что куда) — **на сервере**, клиент ничего не настраивает.
 
 ---
 
-## Главная схема — что куда идёт
+## Главная схема — что куда идёт (split на сервере)
 
 ```mermaid
 flowchart TD
-    Phone["📱 Устройство ученика<br/>(iPhone / Mac / PC / Android)<br/><br/>📲 Приложения:<br/>браузер · VSCode · Telegram ·<br/>любой бот · curl · git"]
+    Phone["📱 Устройство ученика<br/>(iPhone / Mac / PC / Android)<br/><br/>📲 любой клиент:<br/>Hiddify · Happ · Karing · SFA<br/><br/>гонит ВЕСЬ трафик на сервер"]
 
-    Phone -->|"Весь системный трафик<br/>(TUN-режим включён)"| Hiddify
+    Phone -->|"Весь системный трафик<br/>(TUN-режим включён)"| RuVPS
 
-    Hiddify{"🎯 Hiddify клиент<br/>смотрит на каждый запрос<br/>и решает куда отправить"}
+    subgraph Server["🇷🇺 Твой VPS в России (3X-UI, ядро Xray)"]
+      Router{"🎯 Routing на сервере<br/>смотрит на каждый запрос<br/>и решает куда отправить"}
+      Router -->|"🟢 geoip:ru / *.ru /<br/>sber.ru, gosuslugi.ru, vk.com"| Direct
+      Router -->|"🚫 реклама/трекеры<br/>(geosite:category-ads-all)"| Block["⛔ block"]
+      Router -->|"🔵 youtube, chatgpt,<br/>github, всё остальное"| Up["⬆️ outbound upstream"]
+    end
 
-    Hiddify -->|"запрос на<br/>🟢 sber.ru, gosuslugi.ru,<br/>vk.com, *.ru и т.п."| Direct
-    Hiddify -->|"запрос на<br/>🔵 youtube.com, chatgpt.com,<br/>github.com и любой другой<br/>зарубежный сайт"| RuVPS
+    RuVPS["вход: VLESS-TCP inbound"] --> Router
 
-    Direct["☁️ Напрямую через<br/>домашний/мобильный интернет<br/><br/>📡 быстро (10мс)<br/>🔒 сайт видит твой реальный<br/>российский IP — не банит"]
+    Direct["☁️ outbound direct<br/>(с IP сервера, РФ)<br/><br/>🔒 РФ-сайт видит российский IP<br/>сервера — не банит"]
 
-    RuVPS["🇷🇺 Твой VPS в России<br/>(уже есть в курсе)<br/><br/>панель 3X-UI пробрасывает<br/>трафик дальше"]
-
-    RuVPS --> Provider
-
-    Provider["🌍 Подписка VPN-провайдера<br/>(Blanc / AmneziaPremium / др.)<br/><br/>📌 у тебя уже подключена<br/>в 3X-UI как outbound"]
+    Up --> Provider["🌍 Подписка VPN-провайдера<br/>(Blanc / AmneziaPremium / др.)<br/>или свой загр.VPS"]
 
     Provider --> World["🌐 Свободный интернет"]
+    Direct --> WorldRu["🇷🇺 Российский интернет"]
 
     classDef ru fill:#ffe5e5,stroke:#cc0000,color:#000
     classDef directStyle fill:#e5ffe5,stroke:#00aa00,color:#000
     classDef vpn fill:#e5f3ff,stroke:#0066cc,color:#000
     classDef world fill:#fff5e5,stroke:#cc7700,color:#000
 
-    class Phone,Hiddify ru
-    class Direct directStyle
-    class RuVPS,Provider vpn
+    class Phone,RuVPS,Router ru
+    class Direct,WorldRu directStyle
+    class Up,Provider vpn
     class World world
 ```
 
 **Главная идея:**
-- Российские сайты идут **напрямую** — мимо твоего сервера, мимо VPN, как будто VPN выключен
-- Всё остальное (YouTube, ChatGPT, GitHub) идёт **через твой РФ-сервер** → **через подписку VPN-провайдера** → в свободный интернет
-- Hiddify сам выбирает что куда — ты только включаешь его один раз и забываешь
+- Клиент на устройстве гонит **весь** трафик на твой РФ-сервер — он ничего не решает сам
+- **Сервер** разбирает: РФ-сайты → direct (с IP сервера), реклама → block, остальное → через провайдера в свободный интернет
+- Ты настраиваешь правила **один раз на сервере**; на всех устройствах достаточно подписки и тумблера
+
+> ⚠️ Раньше split рисовался **на клиенте** (Hiddify решает куда). Это не
+> заработало на практике — Hiddify не исполняет произвольные правила. Новый
+> дефолт — split на сервере (`_reference/routing-server-3xui.md`).
+>
+> 📡 Цена: РФ-трафик делает лишний hop через сервер (+10-20 мс) и выходит с IP
+> сервера, а не домашним. Для Госуслуг/Сбера это ок. Прямой выход РФ-трафика —
+> только при on-device split (для энтузиастов, `_reference/routing-on-device-singbox.md`).
 
 ---
 
@@ -138,28 +148,30 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    Phone["📱 Устройство"]
-    Phone --> Hiddify["🎯 Hiddify"]
+    Phone["📱 Устройство<br/>(любой клиент, весь трафик → сервер)"]
+    Phone --> Router
 
-    Hiddify -->|"🟢 РФ-сайты"| Direct["напрямую"]
-    Hiddify -->|"🤖 AI-домены<br/>(chatgpt, claude,<br/>perplexity)"| RuVPS
-    Hiddify -->|"🔵 всё остальное"| RuVPS
+    subgraph RuVPS["🇷🇺 Твой РФ-VPS (3X-UI)"]
+      Router{"🎯 Routing на сервере"}
+      Router -->|"🟢 РФ-сайты"| Direct["outbound direct"]
+      Router -->|"🤖 AI-домены<br/>(chatgpt, claude, perplexity)"| ToMyVPS["⬆️ outbound: личный загр.VPS"]
+      Router -->|"🔵 всё остальное"| ToProv["⬆️ outbound: подписка"]
+    end
 
-    RuVPS["🇷🇺 Твой РФ-VPS<br/>(3X-UI)"]
-
-    RuVPS -->|"AI"| MyVPS["🌍 Твой ЛИЧНЫЙ<br/>загр.VPS<br/>(3X-UI)<br/><br/>📌 чистый IP только для тебя"]
-    RuVPS -->|"остальное"| Provider["🌍 Подписка провайдера<br/>(shared IP)"]
+    ToMyVPS --> MyVPS["🌍 Твой ЛИЧНЫЙ загр.VPS<br/>(3X-UI)<br/>📌 чистый IP только для тебя"]
+    ToProv --> Provider["🌍 Подписка провайдера<br/>(shared IP)"]
 
     MyVPS --> AI["🤖 ChatGPT / Claude"]
     Provider --> Net["🌐 интернет"]
+    Direct --> NetRu["🇷🇺 РФ-интернет"]
 
     classDef ru fill:#ffe5e5,stroke:#cc0000,color:#000
     classDef ai fill:#fff5e5,stroke:#cc7700,color:#000
     classDef vpn fill:#e5f3ff,stroke:#0066cc,color:#000
 
-    class Phone,Hiddify,RuVPS,Direct ru
+    class Phone,Router,Direct,NetRu ru
     class MyVPS,AI ai
-    class Provider,Net vpn
+    class ToProv,Provider,ToMyVPS vpn
 ```
 
 **Когда нужно:**
@@ -178,24 +190,26 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    Phone["📱 Устройство"]
-    Phone --> Hiddify["🎯 Hiddify"]
+    Phone["📱 Устройство<br/>(любой клиент, весь трафик → сервер)"]
+    Phone --> Router
 
-    Hiddify -->|"🟢 РФ-сайты"| Direct["напрямую"]
-    Hiddify -->|"🔵 всё остальное"| RuVPS
+    subgraph RuVPS["🇷🇺 Твой РФ-VPS (3X-UI)"]
+      Router{"🎯 Routing на сервере"}
+      Router -->|"🟢 РФ-сайты"| Direct["outbound direct"]
+      Router -->|"🔵 всё остальное"| ToForeign["⬆️ outbound: свой загр.VPS"]
+    end
 
-    RuVPS["🇷🇺 Твой РФ-VPS<br/>(3X-UI)"]
-
-    RuVPS --> MyForeignVPS["🌍 Твой ВТОРОЙ VPS<br/>за границей<br/>(тоже 3X-UI)<br/><br/>📌 ты сам админ<br/>📌 нет провайдера-посредника"]
+    ToForeign --> MyForeignVPS["🌍 Твой ВТОРОЙ VPS<br/>за границей (тоже 3X-UI)<br/>📌 ты сам админ<br/>📌 нет провайдера-посредника"]
 
     MyForeignVPS --> Net["🌐 интернет"]
+    Direct --> NetRu["🇷🇺 РФ-интернет"]
 
     classDef ru fill:#ffe5e5,stroke:#cc0000,color:#000
     classDef self fill:#fff5e5,stroke:#cc7700,color:#000
     classDef inet fill:#e5ffe5,stroke:#00aa00,color:#000
 
-    class Phone,Hiddify,RuVPS,Direct ru
-    class MyForeignVPS self
+    class Phone,Router,Direct,NetRu ru
+    class MyForeignVPS,ToForeign self
     class Net inet
 ```
 
@@ -223,7 +237,9 @@ flowchart TD
 ---
 
 *Связи:*
-- *Полная инструкция с шагами настройки → `_reference/vpn-consultation-flow.md` (будет создан)*
+- *Сценарий консультации (hub) → `_reference/vpn-consultation-flow.md`*
+- *Маршрутизация на сервере (дефолт) → `_reference/routing-server-3xui.md`*
+- *Маршрутизация on-device → `_reference/routing-on-device-singbox.md`, `_reference/routing-on-device-xray.md`*
 - *Технические детали протоколов → `_reference/vpn-protocols.md`*
 - *Транспорты и fronting → `_reference/transports.md`, `_reference/fronting-strategies.md`*
 - *Фронт блокировок РФ → `_live/frontline-ru.md`*
