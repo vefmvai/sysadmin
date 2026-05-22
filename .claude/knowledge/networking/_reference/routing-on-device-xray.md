@@ -35,8 +35,16 @@ sources_checked:
 |---|---|
 | split РФ/foreign на устройстве, простой клиент с GUI | `routing-on-device-singbox.md` |
 | split РФ/foreign на устройстве через Xray в терминале | **этот файл** |
+| split на устройстве через Happ (GUI-обёртка над Xray) | `client-apps.md` §3.6 |
 | chain-bypass (VLESS→VLESS) специально для Claude Code на Mac, proxy-only | `xray-mac-chain.md` |
 | вообще не настраивать устройство, всё на сервере (дефолт) | `routing-server-3xui.md` |
+
+> **Happ — это GUI-обёртка над тем же Xray-core.** Его routing-профиль (deeplink
+> `happ://routing/add/{base64}`, конструктор `routing.happ.su`) — упрощённая форма
+> той же Xray `routing`-секции из §3, применяется локально на устройстве. Если нужен
+> GUI вместо терминала и хватает полей `DirectSites/ProxySites/BlockSites` —
+> бери Happ (`client-apps.md` §3.6). Этот файл — для тех, кто хочет полный
+> контроль над Xray-конфигом руками.
 
 **Важно про границу с `xray-mac-chain.md`:** тот документ описывает proxy-only
 chain (две VLESS-ноды через `dialerProxy`, без route/TUN, только для VSCode/Claude
