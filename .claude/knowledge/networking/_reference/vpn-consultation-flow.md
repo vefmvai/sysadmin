@@ -721,4 +721,4 @@ inbound с инвертированным набором правил (`routing-
 - **Панель 3X-UI:** `3x-ui-panel.md`, `3x-ui-api.md`
 - **Фронт блокировок:** `_live/frontline-ru.md`
 - **Скиллы:** `/setup-vpn-panel`, `/configure-vpn-routing`, `/generate-client-config`, `/setup-server-proxy`
-- **Урок курса:** `claude_code_study/модули/модуль-05-сетевая-свобода/10-гибкая-клиентская-маршрутизация.md`
+- **Урок курса:** `claude_code_study/модули/модуль-05-сетевая-свобода/10-гибкая-маршрутизация.md`
