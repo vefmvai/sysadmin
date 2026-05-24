@@ -23,8 +23,25 @@
 #   UPSTREAM_TAGS_JSON  — JSON-массив тегов outbound-ов: ["upstream-de", "upstream-nl"]
 #   BALANCER_STRATEGY   — random | roundRobin | leastPing | leastLoad (default: leastPing)
 #   USE_BALANCER        — yes | no (default: auto — yes если UPSTREAM_TAGS > 1)
+#   PROBE_INTERVAL      — как часто observatory переоценивает серверы (default: 5m).
+#                         ВАЖНО: 3X-UI по умолчанию ставит 1m — это часто, IP «скачет»
+#                         между близкими по пингу серверами. 5m = реже переоценка =
+#                         клиент дольше держится за один сервер. См. эталон §2.7.
+#   PROBE_SAMPLING      — сколько замеров усреднять (для leastLoad/burstObservatory;
+#                         default: 4 вместо дефолтных 2 — сглаживает всплески пинга).
 #   INBOUND_TAGS_JSON   — JSON-массив тегов inbound-ов, к которым применяется
 #                         default-правило (default: все vless/mixed inbound из list)
+#
+# ПРО ПРИЛИПАНИЕ К IP (важно для предсказуемого выхода):
+#   Балансир 3X-UI/Xray НЕ умеет sticky-гистерезис («держись пока не станет хуже
+#   на N мс» — это клиентский sing-box urltest.tolerance, не серверный). На сервере
+#   стабильность IP достигается двумя рычагами:
+#     1. selector из серверов ОДНОЙ страны → даже при failover страна та же,
+#        аккаунты не банятся за «прыжки по странам».
+#     2. PROBE_INTERVAL=5m → редкая переоценка → редкие переключения.
+#   Для АБСОЛЮТНО неизменного IP — один сервер в selector (USE_BALANCER=no).
+#   leastPing-балансир здесь = механизм FAILOVER (мёртвый сервер исключается
+#   observatory), а не «выбираю быстрейший на каждом запросе».
 #
 # Выход (на stdout): JSON с описанием применённой схемы.
 
@@ -43,6 +60,10 @@ ADMIN_LOGIN="${ADMIN_LOGIN:?обязателен}"
 PASSWORD_REF="${PASSWORD_REF:?обязателен}"
 UPSTREAM_TAGS_JSON="${UPSTREAM_TAGS_JSON:?UPSTREAM_TAGS_JSON обязателен (например, [\"upstream-de\"])}"
 BALANCER_STRATEGY="${BALANCER_STRATEGY:-leastPing}"
+# Реже дефолтного 1m — чтобы клиент дольше держался за один сервер (меньше «скачков» IP).
+PROBE_INTERVAL="${PROBE_INTERVAL:-5m}"
+# Больше дефолтного 2 — усреднение сглаживает случайные всплески пинга.
+PROBE_SAMPLING="${PROBE_SAMPLING:-4}"
 
 # Парсим массив upstream-тегов
 UPSTREAM_COUNT="$(echo "$UPSTREAM_TAGS_JSON" | jq 'length')"
@@ -165,14 +186,17 @@ if [ "$USE_BALANCER" = "yes" ]; then
             fallbackTag: "direct"
         }')"
 
-    # Observatory (нужен для leastPing/leastLoad)
+    # Observatory (нужен для leastPing/leastLoad).
+    # probeInterval = PROBE_INTERVAL (default 5m, НЕ 30s/1m) — реже переоценка,
+    # клиент дольше держится за один сервер → стабильнее IP (см. шапку скрипта).
     if [ "$BALANCER_STRATEGY" = "leastPing" ] || [ "$BALANCER_STRATEGY" = "leastLoad" ]; then
         OBSERVATORY_OBJ="$(jq -nc \
             --argjson selector "$UPSTREAM_TAGS_JSON" \
+            --arg interval "$PROBE_INTERVAL" \
             '{
                 subjectSelector: $selector,
                 probeUrl: "http://www.google.com/gen_204",
-                probeInterval: "30s"
+                probeInterval: $interval
             }')"
     else
         OBSERVATORY_OBJ="null"

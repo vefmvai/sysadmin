@@ -9,7 +9,9 @@ description: |
   с учётом ограничений каждой платформы (iOS не имеет process_name/
   strict_route, Android умеет package_name, desktop — всё).
   Триггеры: «сделай VPN-конфиг для iPhone», «сгенерируй vless-ссылку», «QR-код
-  для клиента», «sing-box JSON под Android», «выпусти конфиг для семьи».
+  для клиента», «sing-box JSON под Android», «выпусти конфиг для семьи»,
+  «дай мне подключиться к своему серверу», «настрой Happ на мой сервер»,
+  «как мне зайти на свой VPN», «конфиг для Happ».
   НЕ для установки панели — `/setup-vpn-panel`. НЕ для создания клиентов
   в панели — `/configure-vpn-routing`. НЕ для серверного прокси —
   `/setup-server-proxy`.
