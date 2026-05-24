@@ -117,11 +117,15 @@
 # установки: tree точно соответствует тегу, случайные коммиты невозможны.
 # Обновление через команду «обнови sysadmin» выполняет git fetch + git checkout --detach
 # на новый тег, сохраняя ту же модель работы.
-git clone --branch v1.0.0 https://github.com/vefmvai/sysadmin "$SYSADMIN_PATH"
-
-# Если v1.0.0 не существует (репо ещё без тегов) — fallback на main с предупреждением
-if [ $? -ne 0 ]; then
-    echo "WARN: тег v1.0.0 не найден, клонирую main (нестабильно)"
+# Клонируем ПОСЛЕДНИЙ стабильный тег (не хардкодим номер — иначе он устаревает
+# с каждым релизом и новый пользователь получает старую версию без свежих фиксов).
+LATEST_TAG=$(git ls-remote --tags --refs --sort=-v:refname https://github.com/vefmvai/sysadmin \
+    | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
+if [ -n "$LATEST_TAG" ]; then
+    echo "Клонирую последнюю стабильную версию: $LATEST_TAG"
+    git clone --branch "$LATEST_TAG" https://github.com/vefmvai/sysadmin "$SYSADMIN_PATH"
+else
+    echo "WARN: теги не найдены, клонирую main (нестабильно)"
     git clone https://github.com/vefmvai/sysadmin "$SYSADMIN_PATH"
 fi
 
@@ -262,7 +266,7 @@ echo "Создан bridge: ~/.claude/agents/sysadmin.md → $SYSADMIN_PATH"
 - **Не клонировать в `/tmp` или системные папки** — папка живёт долго, должна быть в home.
 - **Не запускать `/sysadmin-init` без `cd $SYSADMIN_PATH`** — скилл не подхватится из чужой папки.
 - **Не молча перезаписывать существующий bridge или infra/** — всегда подтверждение, backup при замене.
-- **Не делать `git pull` на main без тега** — тег `v1.0.0` (или последний) обязателен для стабильности.
+- **Не делать `git pull` на main без тега** — последний стабильный тег обязателен для стабильности.
 - **Не пытаться поставить агента на сам сервер** — sysadmin живёт на машине оператора (ноутбуке), управляет сервером через SSH. Установка **на сервер** — нонсенс.
 - **Не делать `chmod +x` на скрипты `infra/scripts/`** — это работа `/bootstrap-new-server` на сервере, не локально.
 
@@ -276,6 +280,8 @@ echo "Создан bridge: ~/.claude/agents/sysadmin.md → $SYSADMIN_PATH"
 
 ## Версионирование
 
-Этот INSTALL.md соответствует версии `1.0.0` (см. файл `VERSION` в корне репо). Если оператор просит «поставь конкретную версию» — используй `git clone --branch vX.Y.Z`.
+Актуальная версия — в файле `VERSION` в корне репо; установка клонирует последний
+тег `vX.Y.Z` автоматически (см. Шаг 6). Если оператор просит конкретную версию —
+`git clone --branch vX.Y.Z`.
 
 История релизов — в github releases: https://github.com/vefmvai/sysadmin/releases
