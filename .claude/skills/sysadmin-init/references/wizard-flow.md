@@ -83,8 +83,9 @@ fi
 
 # 3. Записать в конфиг через jq — значение пишется КАК ВВЕДЕНО (с tilde, относительный),
 #    не expanded. Cold Start персоны при чтении сам раскроет tilde через bash-замену.
+#    $DRAFT и $WORKDIR заданы в Шаге 0 SKILL.md (mktemp -d, портируемо на Windows-Git-Bash).
 jq --arg path "$ANSWER" '.infrastructure = {root_path: $path}' \
-    /tmp/sysadmin-config-draft.json > /tmp/x && mv /tmp/x /tmp/sysadmin-config-draft.json
+    "$DRAFT" > "$WORKDIR/x" && mv "$WORKDIR/x" "$DRAFT"
 ```
 
 **Важные моменты:**

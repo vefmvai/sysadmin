@@ -54,11 +54,22 @@ locate_sysadmin_root() {
     # 1. Через bridge-файл (надёжный источник истины)
     local bridge="$HOME/.claude/agents/sysadmin.md"
     if [ -f "$bridge" ]; then
-        # Ищем абсолютный путь, заканчивающийся на /sysadmin/ или /sysadmin
+        # Ищем абсолютный путь к sysadmin/ в обратных кавычках. Кросс-платформенно:
+        #   - Unix/MINGW:   `/home/.../sysadmin`  или  `/c/Users/.../sysadmin`
+        #   - Windows-native: `C:\Users\...\sysadmin`  или  `C:/Users/.../sysadmin`
+        # Поэтому НЕ требуем ведущий '/'. Берём всё между обратными кавычками, что
+        # заканчивается на sysadmin (с возможным завершающим слешем любого типа).
         local from_bridge
-        from_bridge=$(grep -oE '`/[^`]+sysadmin/?`' "$bridge" 2>/dev/null \
+        from_bridge=$(grep -oE '`[^`]+sysadmin[/\\]?`' "$bridge" 2>/dev/null \
             | head -1 \
-            | sed 's|^`||; s|`$||; s|/$||')
+            | sed 's|^`||; s|`$||; s|[/\\]$||')
+        # Windows-native путь (C:\...) внутри Git Bash нужно привести к /c/... —
+        # bash не умеет с C:\ напрямую. cygpath есть в Git Bash; если нет — оставляем.
+        if [ -n "$from_bridge" ] && command -v cygpath >/dev/null 2>&1; then
+            case "$from_bridge" in
+                [A-Za-z]:*) from_bridge="$(cygpath -u "$from_bridge" 2>/dev/null || echo "$from_bridge")" ;;
+            esac
+        fi
         if [ -n "$from_bridge" ] && [ -d "$from_bridge" ]; then
             SYSADMIN_ROOT="$from_bridge"
             return 0
