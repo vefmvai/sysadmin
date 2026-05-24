@@ -13,13 +13,15 @@
 #   INBOUND_PROTOCOL       — vless-tcp | vless-reality
 #   INBOUND_FLOW           — пусто или xtls-rprx-vision
 #   SERVER_ROLE            — ru-server | foreign-server | "" (для guard'а протокола)
+#   CONFIRM_REALITY_ON_RU  — yes, чтобы осознанно создать Reality на ru-server
 #   SSH_TARGET             — для генерации Reality keypair при vless-reality
 #   REALITY_DEST           — для vless-reality (например, www.cloudflare.com)
 #
-# ВАЖНО (guard): vless-reality на ru-server — техническая ошибка. Маршрут
-#   «клиент в РФ → сервер в РФ» не пересекает TSPU, маскировка не нужна и не
-#   работает во благо. Скрипт блокирует такую комбинацию. Reality нужен только
-#   на foreign-server (трансграничный вход) или как outbound к загр.VPS.
+# ВАЖНО (guard): vless-reality на ru-server обычно избыточен. Маршрут «клиент в
+#   РФ → сервер в РФ» не пересекает TSPU, маскировка чаще всего ни от чего не
+#   защищает. Скрипт НЕ запрещает такой выбор, но требует осознанного
+#   подтверждения (CONFIRM_REALITY_ON_RU=yes) — чтобы Reality не появился на
+#   РФ-сервере СЛУЧАЙНО. Reality штатно нужен на foreign-server или как outbound.
 #
 # Выход (на stdout): JSON-объект созданного inbound + UUID первого клиента.
 #   { "inbound_id": 1, "first_client_uuid": "...", "tag": "..." }
@@ -43,23 +45,36 @@ INBOUND_LISTEN_PORT="${INBOUND_LISTEN_PORT:-443}"
 INBOUND_PROTOCOL="${INBOUND_PROTOCOL:-vless-tcp}"
 INBOUND_FLOW="${INBOUND_FLOW:-}"
 SERVER_ROLE="${SERVER_ROLE:-}"
+CONFIRM_REALITY_ON_RU="${CONFIRM_REALITY_ON_RU:-}"
 
-# --- Guard: Reality на РФ-сервере запрещён ---------------------------------
+# --- Guard: Reality на РФ-сервере по умолчанию не создаётся -----------------
 # Вход клиентов на РФ-сервер не пересекает TSPU — маскировка (Reality/Vision)
-# избыточна и является технической ошибкой (заработал бы даже WireGuard).
-# Reality допустим только на foreign-server (трансграничный вход).
-if [ "$INBOUND_PROTOCOL" = "vless-reality" ] && [ "$SERVER_ROLE" = "ru-server" ]; then
+# обычно избыточна (заработал бы даже WireGuard). Это НЕ запрет: оператор может
+# осознанно захотеть Reality на РФ-inbound (эксперимент, учебная цель, нетипичный
+# кейс). Guard ловит только СЛУЧАЙНУЮ подстановку. Чтобы создать осознанно —
+# агент сначала объясняет (роль ментора, см. SKILL.md Шаг 4), затем передаёт
+# CONFIRM_REALITY_ON_RU=yes. exit 3 = «нужно подтверждение», не «ошибка».
+if [ "$INBOUND_PROTOCOL" = "vless-reality" ] && [ "$SERVER_ROLE" = "ru-server" ] \
+   && [ "$CONFIRM_REALITY_ON_RU" != "yes" ]; then
     cat >&2 <<'ERR'
-ERROR: vless-reality на ru-server — техническая ошибка, заблокировано.
+СТОП (нужно подтверждение): vless-reality на ru-server — нетипичный выбор.
 
   Вход «клиент в РФ → сервер в РФ» НЕ пересекает TSPU. Маскировка под Reality
-  ничего не даёт: маскировать нечего и не от кого. Используй INBOUND_PROTOCOL=vless-tcp.
+  здесь обычно ничего не даёт: маскировать нечего и не от кого. Штатный вариант —
+  INBOUND_PROTOCOL=vless-tcp.
 
-  Reality нужен ТОЛЬКО на foreign-server (трансграничный вход) либо как outbound
-  к заграничному VPS. Если это действительно загр.сервер — передай
+  Это не запрет. Если оператор осознанно хочет Reality на РФ-сервере (эксперимент,
+  обучение, нестандартный кейс) — объясни ему «зачем обычно не нужно» и спроси
+  «точно этого хочешь?». При подтверждении — повтори запуск с CONFIRM_REALITY_ON_RU=yes.
+
+  Если же это на самом деле загр.сервер — роль указана неверно, передай
   SERVER_ROLE=foreign-server. См. knowledge/networking/_reference/vpn-consultation-flow.md §4.
 ERR
-    exit 2
+    exit 3
+fi
+
+if [ "$INBOUND_PROTOCOL" = "vless-reality" ] && [ "$SERVER_ROLE" = "ru-server" ]; then
+    echo "[inbound] ⚠️  Создаю Reality-inbound на РФ-сервере по явному подтверждению оператора (CONFIRM_REALITY_ON_RU=yes). Нетипичный выбор — это норм, если так задумано." >&2
 fi
 # ---------------------------------------------------------------------------
 
