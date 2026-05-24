@@ -5,6 +5,12 @@
 # состояния: контейнеры, compose-файлы, сети, тома, ресурсы хоста, cron, nginx,
 # TLS-сертификаты, host-scripts, .env (redacted), systemd-юниты, доступные апдейты.
 #
+# БЕЗОПАСНОСТЬ (redaction v1): секреты в env контейнеров (docker inspect) и в
+# .env-файлах хоста маскируются ДО записи на диск — KEY=value с секрет-именами
+# и креды в URL (scheme://user:pass@host) заменяются на <REDACTED>. Имена
+# переменных сохраняются для аудита. См. meta.txt (redaction_applied) и
+# references/dump-snapshot-quirks.md.
+#
 # Использование:
 #   bash dump-snapshot.sh <SERVER> [DATE] [INVENTORY_DIR]
 #
@@ -119,6 +125,63 @@ fi
 # === Создаём папку снимка ===
 mkdir -p "$SNAPSHOT_DIR"
 
+# === Redaction секретов в снимке ===
+# Любой dump может случайно уйти в коммит, bug-report или бэкап. Маскируем
+# секреты ДО записи на диск — а не надеемся только на .gitignore (последний
+# рубеж, не основная защита).
+#
+# Закрываем ДВА паттерна, оба зафиксированы в references/dump-snapshot-quirks.md:
+#   1. KEY=value   — env-переменные вида OPENROUTER_API_KEY=sk-or-v1-...
+#   2. url://user:pass@host — пароль внутри connection-string (postgres://, redis://, amqp://...)
+#
+# Без жёсткой зависимости от jq (его часто нет на macOS/Git-for-Windows у
+# оператора, через которого проходит snapshot — см. инцидент Windows-портабельности).
+# Если jq есть — используем его для structurally-aware redaction .Config.Env;
+# если нет — построчный fallback на sed/grep, работающий везде. Защита не
+# должна зависеть от того, что доустановил оператор.
+
+REDACTION_VERSION="v1"
+
+# Построчная маскировка (fallback и для не-JSON секций). Stdin -> stdout.
+redact_stream() {
+    # 1. KEY=value, где KEY оканчивается на TOKEN/KEY/SECRET/PASSWORD/PASS/API (case-insensitive)
+    # 2. credentials в URL: scheme://user:pass@host -> scheme://user:<REDACTED>@host
+    sed -E \
+        -e 's/("?[A-Za-z0-9_]*(TOKEN|KEY|SECRET|PASSWORD|PASS|API)"?[[:space:]]*[=:][[:space:]]*"?)[^"[:space:],}]+/\1<REDACTED>/Ig' \
+        -e 's#(([A-Za-z][A-Za-z0-9+.-]*)://[^:@/[:space:]]+:)[^@/[:space:]]+@#\1<REDACTED>@#g'
+}
+
+# Маскировка JSON через jq, если он доступен: значения .Config.Env и .Env,
+# чей ключ матчит секрет-паттерн, заменяются на KEY=<REDACTED> (имя ключа
+# сохраняется для аудита). Возвращает ненулевой код, если jq не справился —
+# тогда вызывающий код падает в построчный fallback.
+#
+# ВАЖНО: один лишь jq НЕ ловит пароль внутри URL (DATABASE_URL=postgres://u:pass@host)
+# — имя переменной не матчит секрет-паттерн, и строка остаётся нетронутой
+# (проверено тестом: пароль утекал). Поэтому ПОСЛЕ структурной маскировки
+# прогоняем вывод jq через тот же URL-паттерн, что и построчный fallback.
+redact_json_with_jq() {
+    jq '
+      def redact_env:
+        if . == null then .
+        else map(
+          if test("^[^=]*(TOKEN|KEY|SECRET|PASSWORD|PASS|API)[^=]*=" ; "i")
+          then sub("=.*"; "=<REDACTED>")
+          else .
+          end
+        )
+        end;
+      (.. | objects | select(has("Env")) | .Env) |= redact_env
+    ' 2>/dev/null \
+    | sed -E "s#(([A-Za-z][A-Za-z0-9+.-]*)://[^:@/[:space:]]+:)[^@/[:space:]\"]+@#\1<REDACTED>@#g"
+}
+
+if command -v jq &>/dev/null; then
+    REDACTION_TOOL="jq"
+else
+    REDACTION_TOOL="sed-fallback"
+fi
+
 # === Вспомогательная функция записи секции ===
 # run_remote <имя_файла> <команда>
 run_remote() {
@@ -142,6 +205,9 @@ host_dir: ${HOST_DIR}
 inventory_dir: ${INVENTORY_DIR}
 taken_by: $(whoami)
 script_version: bundled-v2
+redaction_applied: true
+redaction_version: ${REDACTION_VERSION}
+redaction_tool: ${REDACTION_TOOL}
 METATXT
 
 # === 16 контентных файлов снимка ===
@@ -150,9 +216,21 @@ METATXT
 run_remote "containers.txt" \
     "docker ps -a --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'"
 
-# 2. Полный inspect всех контейнеров (env, mounts, networks)
-run_remote "containers-inspect.json" \
-    "docker ps -a -q | xargs docker inspect 2>/dev/null || echo '[]'"
+# 2. Полный inspect всех контейнеров (env, mounts, networks) — С REDACTION.
+#    Сырой docker inspect содержит env-переменные контейнеров открытым текстом
+#    (API-ключи, токены ботов, пароли БД). Маскируем секреты ДО записи на диск.
+#    jq-путь (structurally-aware) с fallback на построчный sed.
+echo "  -> containers-inspect.json (redacted: ${REDACTION_TOOL})..."
+INSPECT_RAW=$(run_cmd "docker ps -a -q | xargs docker inspect 2>/dev/null || echo '[]'" 2>/dev/null || echo '[]')
+if [ "$REDACTION_TOOL" = "jq" ]; then
+    # Пробуем jq; если он не распарсил (битый JSON) — падаем в построчный fallback.
+    if ! printf '%s' "$INSPECT_RAW" | redact_json_with_jq > "${SNAPSHOT_DIR}/containers-inspect.json" 2>/dev/null \
+       || [ ! -s "${SNAPSHOT_DIR}/containers-inspect.json" ]; then
+        printf '%s' "$INSPECT_RAW" | redact_stream > "${SNAPSHOT_DIR}/containers-inspect.json"
+    fi
+else
+    printf '%s' "$INSPECT_RAW" | redact_stream > "${SNAPSHOT_DIR}/containers-inspect.json"
+fi
 
 # 3. Список compose-файлов на сервере
 run_remote "compose-files.txt" \
@@ -210,7 +288,12 @@ run_remote "host-env-redacted.txt" \
   echo "--- metadata ---"
   stat -c "%a %U:%G %s bytes modified %y" "$f"
   echo "--- variable names (values redacted) ---"
-  sed "s/=.*/=<HIDDEN>/" "$f"
+  # Маскируем значение после = целиком. Дополнительно ловим креды в URL
+  # (postgres://user:pass@host), если значение само по себе не было скрыто
+  # выше — на случай многострочных значений или нестандартного синтаксиса.
+  sed -E \
+    -e "s/=.*/=<HIDDEN>/" \
+    -e "s#(([A-Za-z][A-Za-z0-9+.-]*)://[^:@/[:space:]]+:)[^@/[:space:]]+@#\1<REDACTED>@#g" "$f"
   echo ""
 done'
 

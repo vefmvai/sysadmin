@@ -240,10 +240,12 @@ find "$INVENTORY_DIR/hosts/<host>/snapshots/" -mindepth 1 -maxdepth 1 -type d \
   маскирует только `=value`, но в URL вида `postgres://user:pass@host` пароль
   виден. Лечение: добавлять новые regex-паттерны при обнаружении (см.
   `references/dump-snapshot-quirks.md`).
-- **«gitleaks ругается на containers-inspect.json»** — env-переменные внутри Docker
-  inspect видны как plain text. Файл лежит в `inventory/snapshots/` (gitignored по
-  умолчанию), в публичный репо не попадает. Если нужно сохранить — отдельно
-  redact через `jq`.
+- **«секреты в containers-inspect.json»** — ИСПРАВЛЕНО (redaction v1). Скрипт
+  маскирует env-секреты (`KEY=value` и креды в URL) **до записи на диск** —
+  не полагаясь только на `.gitignore`. Метки в `meta.txt`: `redaction_applied: true`.
+  Подробности — `references/dump-snapshot-quirks.md`. gitleaks по этому файлу больше
+  не должен находить реальных секретов; имена переменных (`*_API_KEY=<REDACTED>`)
+  остаются для аудита.
 
 # Граничные случаи
 

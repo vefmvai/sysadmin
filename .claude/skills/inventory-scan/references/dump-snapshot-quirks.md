@@ -74,20 +74,39 @@ gitleaks. Файл `containers-inspect.json` всегда даёт ~40 false pos
 
 ---
 
-## containers-inspect.json — env-переменные plain text
+## containers-inspect.json — env-переменные plain text (ИСПРАВЛЕНО)
 
-**Симптом:** `docker inspect` выдаёт env-переменные контейнера без
-маскирования. Пароли БД, JWT-секреты, API-ключи видны.
+**Симптом (до фикса):** `docker inspect` выдавал env-переменные контейнера
+без маскирования. Пароли БД, JWT-секреты, API-ключи (`OPENROUTER_API_KEY`,
+`BOT_TOKEN` и т.п.) были видны открытым текстом. Файл мог случайно уйти
+в коммит (`git add -A`), bug-report или rsync-бэкап — а `.gitignore` это
+лишь последний рубеж, не основная защита.
 
-**Лечение:**
-1. Файл лежит в `inventory/hosts/<host>/snapshots/<DATE>/` — папка
-   snapshots в `.gitignore` (правило этапа 1).
-2. В публичные документы (например, `services.md`) этот файл не копируется
-   полностью — только нужные поля через `jq`, без env-секции.
-3. Если нужно сохранить inspect для аудита — отдельно redact через `jq`:
-   ```bash
-   jq 'del(.[].Config.Env)' containers-inspect.json > containers-inspect-redacted.json
-   ```
+**Исправлено в коде (redaction v1).** `dump-snapshot.sh` теперь маскирует
+секреты **до записи на диск**, а не полагается только на `.gitignore`.
+Маскировка закрывает два паттерна:
+1. `KEY=value`, где имя оканчивается на `TOKEN/KEY/SECRET/PASSWORD/PASS/API`
+   (case-insensitive) → `KEY=<REDACTED>` (имя сохраняется для аудита).
+2. Креды в URL: `scheme://user:pass@host` → `scheme://user:<REDACTED>@host`.
+
+Реализация — **без жёсткой зависимости от `jq`** (его часто нет на
+macOS/Git-for-Windows у оператора, через которого проходит snapshot,
+см. инцидент Windows-портабельности). Если `jq` есть — structurally-aware
+redaction `.Config.Env`; если нет — построчный fallback на `sed`. Оба
+пути дополнительно прогоняют URL-паттерн (одного `jq` мало: переменная
+вида `DATABASE_URL` не матчит секрет-паттерн по имени, и пароль внутри
+URL утекал бы — проверено тестом).
+
+В снимке рядом — метки в `meta.txt`: `redaction_applied: true`,
+`redaction_version: v1`, `redaction_tool: jq|sed-fallback` — при ревью
+сразу видно, что данные не raw.
+
+**Что осталось на операторе:**
+1. Файл всё равно лежит в `inventory/hosts/<host>/snapshots/<DATE>/` —
+   папка snapshots в `.gitignore` (правило этапа 1). Маскировка — основная
+   защита, `.gitignore` — дублирующий рубеж.
+2. В публичные документы (`services.md`) этот файл не копируется
+   целиком — только нужные поля, без env-секции.
 
 ---
 
