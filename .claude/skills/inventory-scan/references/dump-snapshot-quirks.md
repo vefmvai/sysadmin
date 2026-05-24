@@ -82,12 +82,18 @@ gitleaks. Файл `containers-inspect.json` всегда даёт ~40 false pos
 в коммит (`git add -A`), bug-report или rsync-бэкап — а `.gitignore` это
 лишь последний рубеж, не основная защита.
 
-**Исправлено в коде (redaction v1).** `dump-snapshot.sh` теперь маскирует
+**Исправлено в коде (redaction v2).** `dump-snapshot.sh` теперь маскирует
 секреты **до записи на диск**, а не полагается только на `.gitignore`.
-Маскировка закрывает два паттерна:
-1. `KEY=value`, где имя оканчивается на `TOKEN/KEY/SECRET/PASSWORD/PASS/API`
-   (case-insensitive) → `KEY=<REDACTED>` (имя сохраняется для аудита).
+Маскировка закрывает четыре паттерна:
+1. `KEY=value`, где секрет-слово (`TOKEN/KEY/SECRET/PASSWORD/PASS/API/CREDENTIAL`,
+   case-insensitive) стоит **где угодно в имени** переменной (не только в конце) →
+   `KEY=<REDACTED>` (имя сохраняется для аудита). Так ловятся и `AWS_ACCESS_KEY_ID=`,
+   и `API_TOKEN_PROD=`, а не только `*_KEY=`/`*_TOKEN=` (v1 ловил только суффикс).
 2. Креды в URL: `scheme://user:pass@host` → `scheme://user:<REDACTED>@host`.
+3. Секрет в query-string: `?secret=...&token=...` → `?secret=<REDACTED>`.
+4. AWS access key ID по значению: `AKIA`/`ASIA` + 16 символов `[A-Z0-9]` →
+   `<REDACTED>` (ловит идентификатор даже голым в логе, без обёртки `KEY=`).
+   Паттерн без `\b` — `\b` не работает в BSD sed на macOS (кросс-платформенность).
 
 Реализация — **без жёсткой зависимости от `jq`** (его часто нет на
 macOS/Git-for-Windows у оператора, через которого проходит snapshot,
@@ -98,7 +104,7 @@ redaction `.Config.Env`; если нет — построчный fallback на 
 URL утекал бы — проверено тестом).
 
 В снимке рядом — метки в `meta.txt`: `redaction_applied: true`,
-`redaction_version: v1`, `redaction_tool: jq|sed-fallback` — при ревью
+`redaction_version: v2`, `redaction_tool: jq|sed-fallback` — при ревью
 сразу видно, что данные не raw.
 
 **Что осталось на операторе:**

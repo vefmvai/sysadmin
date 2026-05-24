@@ -38,7 +38,7 @@ sources_checked:
      исправлена аргументация про удаление из RU App Store -->
 
 
-> 🎯 **Основной рекомендованный клиент курса и агента — `Happ`** («Happ — Proxy
+> 🎯 **Основной рекомендованный клиент агента — `Happ`** («Happ — Proxy
 > Utility», happ.su). Кроссплатформенный (iPhone, Android, Windows, macOS, Linux),
 > на Xray-ядре, умеет on-device routing (§3.6). Hiddify, Karing, v2rayN, sing-box
 > (sing-box-vt/SFA), v2rayNG — **альтернативы**. Обоснование выбора — ADR-0007.

@@ -5,7 +5,7 @@
 # состояния: контейнеры, compose-файлы, сети, тома, ресурсы хоста, cron, nginx,
 # TLS-сертификаты, host-scripts, .env (redacted), systemd-юниты, доступные апдейты.
 #
-# БЕЗОПАСНОСТЬ (redaction v1): секреты в env контейнеров (docker inspect) и в
+# БЕЗОПАСНОСТЬ (redaction v2): секреты в env контейнеров (docker inspect) и в
 # .env-файлах хоста маскируются ДО записи на диск — KEY=value с секрет-именами
 # и креды в URL (scheme://user:pass@host) заменяются на <REDACTED>. Имена
 # переменных сохраняются для аудита. См. meta.txt (redaction_applied) и
@@ -140,19 +140,27 @@ mkdir -p "$SNAPSHOT_DIR"
 # если нет — построчный fallback на sed/grep, работающий везде. Защита не
 # должна зависеть от того, что доустановил оператор.
 
-REDACTION_VERSION="v1"
+REDACTION_VERSION="v2"
 
 # Построчная маскировка (fallback и для не-JSON секций). Stdin -> stdout.
 redact_stream() {
-    # 1. KEY=value, где KEY оканчивается на TOKEN/KEY/SECRET/PASSWORD/PASS/API (case-insensitive)
+    # 1. KEY=value, где секрет-слово (TOKEN/KEY/SECRET/PASSWORD/PASS/API/CREDENTIAL)
+    #    стоит ГДЕ УГОДНО в имени переменной (не только в конце). Так ловятся и
+    #    AWS_ACCESS_KEY_ID=, и API_TOKEN_PROD=, а не только *_KEY=/*_TOKEN=.
+    #    (выровнено с логикой jq-пути redact_json_with_jq, где секрет-слово тоже
+    #    матчится в любом месте имени до '=').
     # 2. credentials в URL: scheme://user:pass@host -> scheme://user:<REDACTED>@host
     # 3. секрет в query-string URL: ?secret=...&token=... -> ?secret=<REDACTED>
     #    (граблекейс selectel: cron-задача с curl "...?secret=B+SLNc55..." утекала
     #    открытым текстом в crontab.txt — KEY=value и url:pass@ её не ловили).
+    # 4. AWS access key ID по ЗНАЧЕНИЮ: AKIA/ASIA + 16 символов [A-Z0-9]. Имя
+    #    переменной AWS_ACCESS_KEY_ID ловится правилом 1, но голый AKIA... в логе
+    #    или нестандартной обёртке — нет; правило 4 ловит сам идентификатор.
     sed -E \
-        -e 's/("?[A-Za-z0-9_]*(TOKEN|KEY|SECRET|PASSWORD|PASS|API)"?[[:space:]]*[=:][[:space:]]*"?)[^"[:space:],}]+/\1<REDACTED>/Ig' \
+        -e 's/("?[A-Za-z0-9_]*(TOKEN|KEY|SECRET|PASSWORD|PASS|API|CREDENTIAL)[A-Za-z0-9_]*"?[[:space:]]*[=:][[:space:]]*"?)[^"[:space:],}]+/\1<REDACTED>/Ig' \
         -e 's#(([A-Za-z][A-Za-z0-9+.-]*)://[^:@/[:space:]]+:)[^@/[:space:]]+@#\1<REDACTED>@#g' \
-        -e 's/([?&](secret|token|key|password|passwd|access_token|api_key|apikey|sig|signature)=)[^&"'"'"'[:space:]]+/\1<REDACTED>/Ig'
+        -e 's/([?&](secret|token|key|password|passwd|access_token|api_key|apikey|sig|signature)=)[^&"'"'"'[:space:]]+/\1<REDACTED>/Ig' \
+        -e 's/(AKIA|ASIA)[A-Z0-9]{16}/<REDACTED>/g'
 }
 
 # Маскировка JSON через jq, если он доступен: значения .Config.Env и .Env,
