@@ -12,8 +12,14 @@
 #   INBOUND_LISTEN_PORT    — порт inbound на сервере (обычно 443)
 #   INBOUND_PROTOCOL       — vless-tcp | vless-reality
 #   INBOUND_FLOW           — пусто или xtls-rprx-vision
+#   SERVER_ROLE            — ru-server | foreign-server | "" (для guard'а протокола)
 #   SSH_TARGET             — для генерации Reality keypair при vless-reality
 #   REALITY_DEST           — для vless-reality (например, www.cloudflare.com)
+#
+# ВАЖНО (guard): vless-reality на ru-server — техническая ошибка. Маршрут
+#   «клиент в РФ → сервер в РФ» не пересекает TSPU, маскировка не нужна и не
+#   работает во благо. Скрипт блокирует такую комбинацию. Reality нужен только
+#   на foreign-server (трансграничный вход) или как outbound к загр.VPS.
 #
 # Выход (на stdout): JSON-объект созданного inbound + UUID первого клиента.
 #   { "inbound_id": 1, "first_client_uuid": "...", "tag": "..." }
@@ -36,6 +42,26 @@ INBOUND_REMARK="${INBOUND_REMARK:-vless-main}"
 INBOUND_LISTEN_PORT="${INBOUND_LISTEN_PORT:-443}"
 INBOUND_PROTOCOL="${INBOUND_PROTOCOL:-vless-tcp}"
 INBOUND_FLOW="${INBOUND_FLOW:-}"
+SERVER_ROLE="${SERVER_ROLE:-}"
+
+# --- Guard: Reality на РФ-сервере запрещён ---------------------------------
+# Вход клиентов на РФ-сервер не пересекает TSPU — маскировка (Reality/Vision)
+# избыточна и является технической ошибкой (заработал бы даже WireGuard).
+# Reality допустим только на foreign-server (трансграничный вход).
+if [ "$INBOUND_PROTOCOL" = "vless-reality" ] && [ "$SERVER_ROLE" = "ru-server" ]; then
+    cat >&2 <<'ERR'
+ERROR: vless-reality на ru-server — техническая ошибка, заблокировано.
+
+  Вход «клиент в РФ → сервер в РФ» НЕ пересекает TSPU. Маскировка под Reality
+  ничего не даёт: маскировать нечего и не от кого. Используй INBOUND_PROTOCOL=vless-tcp.
+
+  Reality нужен ТОЛЬКО на foreign-server (трансграничный вход) либо как outbound
+  к заграничному VPS. Если это действительно загр.сервер — передай
+  SERVER_ROLE=foreign-server. См. knowledge/networking/_reference/vpn-consultation-flow.md §4.
+ERR
+    exit 2
+fi
+# ---------------------------------------------------------------------------
 
 # Login
 api_login \

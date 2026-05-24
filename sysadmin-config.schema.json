@@ -229,6 +229,11 @@
           "type": ["string", "null"],
           "description": "webBasePath панели (например, '/abc123xyz0/'). Случайный 10-символьный путь, защищающий от сканеров. Заполняется скиллом /setup-vpn-panel. Используется скиллами /configure-vpn-routing, /setup-server-proxy, /generate-client-config при API-вызовах."
         },
+        "server_role": {
+          "type": ["string", "null"],
+          "enum": ["ru-server", "foreign-server", null],
+          "description": "Расположение сервера с панелью. ru-server — VPS в РФ (вход клиентов внутри страны, НЕ пересекает TSPU → inbound ВСЕГДА VLESS-TCP без Reality). foreign-server — заграничный VPS (трансграничный вход → inbound VLESS+Reality обязателен). Заполняется /setup-vpn-panel по параметру LOCATION. Источник правды для /configure-vpn-routing при выборе протокола inbound и для guard'а 'Reality на РФ-сервере запрещён' (см. vpn-consultation-flow.md §4). null — роль не зафиксирована (старый конфиг или установка вне скилла)."
+        },
         "server_proxy_enabled": {
           "type": "boolean",
           "description": "Настроен ли серверный прокси (mixed inbound на 127.0.0.1:1080 + systemd-override для x-ui + /etc/environment с socks5h). true — программы на сервере (бот, npm, pip, curl) ходят в зарубежные API через VPN. Заполняется /setup-server-proxy."

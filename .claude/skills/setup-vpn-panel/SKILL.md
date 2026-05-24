@@ -51,7 +51,7 @@ allowed-tools: Bash, Read, Edit, Write
   При `LOCATION=foreign-server` — 443/tcp открыт для будущего VLESS+Reality inbound.
 - Креды в менеджере паролей под именем `3xui-panel-${SERVER_ALIAS}` (URL, логин, пароль, notes).
 - Inventory обновлён: блок про 3X-UI в `$INFRA/inventory/hosts/$SERVER/services.md`.
-- В `sysadmin-config.json` обновлены поля `vpn.enabled=true`, `vpn.panel_url`, `vpn.panel_web_base_path`.
+- В `sysadmin-config.json` обновлены поля `vpn.enabled=true`, `vpn.panel_url`, `vpn.panel_web_base_path`, `vpn.server_role` (= `$LOCATION`).
 </goals>
 
 # Параметры
@@ -269,11 +269,18 @@ Inventory:
   "enabled": true,
   "panel_url": "https://${DOMAIN}:${PANEL_PORT}",
   "panel_web_base_path": "/${WEB_BASE_PATH}/",
+  "server_role": "${LOCATION}",          // ru-server | foreign-server
   "server_proxy_enabled": false,
   "upstream_kind": "none",
   "default_reality_dest": "${REALITY_DEST}"
 }
 ```
+
+> 🔒 **`server_role` — источник правды для выбора протокола.** Записывается
+> здесь по выбранному `$LOCATION` (Шаг 1). `/configure-vpn-routing` читает это
+> поле и автоматически выводит протокол inbound: `ru-server → vless-tcp` (без
+> Reality), `foreign-server → vless-reality`. На нём же стоит guard в
+> `create-vless-inbound.sh` — Reality на `ru-server` блокируется на уровне кода.
 
 ## Шаг 8: Финальный отчёт
 
