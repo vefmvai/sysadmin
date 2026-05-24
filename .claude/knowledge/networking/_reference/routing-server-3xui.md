@@ -1,7 +1,7 @@
 ---
 knowledge_domain: vpn
 layer: reference
-last_researched: 2026-05-22
+last_researched: 2026-05-24
 ttl_days: 60
 sources_checked:
   - https://github.com/MHSanaei/3x-ui
@@ -72,9 +72,10 @@ sources_checked:
         ▼
 [РФ-VPS, 3X-UI, ядро Xray]
         │
-        ├─ 🟢 geoip:ru / geosite:category-ru / *.ru / явный список → outbound: direct
+        ├─ 🟢 geoip:private → direct (локальная сеть)
+        ├─ 🚫 geosite:category-ads-all / bittorrent → block
+        ├─ 🟢 geoip:ru / geosite:category-ru / regex .ru/.su/.рф → outbound: direct
         │       → РФ-сайт видит IP сервера (РФ), не блокирует
-        ├─ 🚫 geosite:category-ads-all → block
         └─ 🔵 всё остальное → balancerTag: upstream-balancer
                                           │
                                   outbound 2..N: подписка провайдера / свой загр.VPS
@@ -164,15 +165,21 @@ sources_checked:
 ## §4 Правила маршрутизации — порядок критичен
 
 В Xray правила выполняются **сверху вниз, первое совпавшее применяется**.
+Модель — **«золотая середина»** (7 правил, утверждённый эталон курса
+`методолог/16-ЭТАЛОН-гибкой-маршрутизации-3xui.md` §2.5).
 Порядок (в массиве `routing.rules`):
 
-1. `geoip:private → direct` — локальная сеть (192.168.x, 10.x), безусловно
-2. `geosite:category-ads-all → blocked` — реклама раньше всего
-3. `geoip:ru → direct`
-4. `geosite:category-ru → direct`
-5. regex по `.ru`/`.su`/`.рф` → direct
-6. явный список РФ-доменов на не-РФ TLD → direct (§5)
+1. `inboundTag=api → api` — служебное (статистика панели)
+2. `geoip:private → direct` — локальная сеть (192.168.x, 10.x); **НЕ blocked!**
+3. `protocol=bittorrent → blocked`
+4. `geosite:category-ads-all → blocked` — реклама раньше РФ-правил
+5. `geoip:ru → direct` — ловит топ-РФ-сервисы по IP (см. §5)
+6. `[geosite:category-ru, regex .ru/.su/.рф] → direct`
 7. default (всё остальное) → `balancerTag: upstream-balancer`
+
+> **Явный список РФ-доменов на не-РФ TLD исключён** (раньше был «уровень 6»).
+> Research показал: топ-сервисы все на российских IP и ловятся правилом 5
+> (`geoip:ru`), а домены вроде `tinkoff.com` выдуманы. Подробности — §5.
 
 ### 4.1 Полный массив правил (Xray-формат)
 
@@ -180,8 +187,18 @@ sources_checked:
 "rules": [
   {
     "type": "field",
+    "inboundTag": ["api"],
+    "outboundTag": "api"
+  },
+  {
+    "type": "field",
     "ip": ["geoip:private"],
     "outboundTag": "direct"
+  },
+  {
+    "type": "field",
+    "protocol": ["bittorrent"],
+    "outboundTag": "blocked"
   },
   {
     "type": "field",
@@ -205,16 +222,13 @@ sources_checked:
   },
   {
     "type": "field",
-    "domain": [ "...явный список из §5..." ],
-    "outboundTag": "direct"
-  },
-  {
-    "type": "field",
     "inboundTag": ["vless-in"],
     "balancerTag": "upstream-balancer"
   }
 ]
 ```
+
+> Явного правила «список РФ-доменов на не-РФ TLD» здесь нет — оно исключено (§5).
 
 > Примечание про `.рф`: в Xray regexp работает по punycode-форме домена, поэтому
 > `.рф` записывается как `regexp:.+\\.xn--p1ai$`. Прямой `regexp:.+\\.рф$` может
@@ -223,64 +237,54 @@ sources_checked:
 
 ### 4.2 Что ловит каждый уровень
 
-| Уровень | Ловит | НЕ ловит |
+| Правило | Ловит | НЕ ловит |
 |---|---|---|
 | geoip:private | локальная сеть, роутер, NAS | — |
+| bittorrent | torrent-трафик по протоколу (sniffing) | — |
 | category-ads-all | глобальная реклама + трекеры | свежие рекламные домены вне списка |
-| geoip:ru | все IP в российских подсетях | РФ-сайты на иностранном CDN (Cloudflare/Akamai) |
-| geosite:category-ru | РФ-домены из [v2fly/domain-list-community](https://github.com/v2fly/domain-list-community/blob/master/data/category-ru) | домены, добавленные после обновления geosite.dat |
-| regex по TLD | свежие домены в .ru/.su/.рф | РФ-сервисы на .com/.io/.app |
-| явный список | РФ-сервисы на не-РФ TLD (§5) | то, что забыли добавить |
+| geoip:ru | все IP в российских подсетях (банки, госуслуги, маркетплейсы) | РФ-сайты на иностранном CDN (Cloudflare/Akamai — среди топа таких нет, §5) |
+| geosite:category-ru | РФ-домены из [v2fly/domain-list-community](https://github.com/v2fly/domain-list-community/blob/master/data/category-ru) (рекурсивно включает `category-bank-ru`/`category-gov-ru`/`category-ecommerce-ru`) | домены, добавленные после обновления geosite.dat |
+| regex по TLD | свежие домены в .ru/.su/.рф | РФ-сервисы на .com/.io/.app (если такой всплывёт — §5) |
 
 ---
 
-## §5 Явный список РФ-доменов на не-РФ TLD
+## §5 Явный список РФ-доменов на не-РФ TLD — НЕ НУЖЕН (проверено)
 
-Эти домены не попадают под geoip:ru (иностранный CDN) и под regex по TLD
-(не .ru). Их нужно перечислить явно в правиле уровня 6.
+**РФ-сервисы ловятся `geoip:ru` по IP.** Проверка через `dig` + ASN (24 мая
+2026) десяти топ-сервисов (Т-Банк, Сбер, ВТБ, Альфа, Госуслуги, Яндекс, VK,
+Ozon, Wildberries, Avito) показала: **все они на российских ASN**, включая
+CDN-поддомены (`avito.st`, `wbbasket.ru`, `cdn.ozon.ru`). Ни один не на
+Cloudflare/Akamai/Fastly. Значит правило 5 (`geoip:ru`, по IP) их ловит, а
+явный список доменов им не нужен. `geosite:category-ru` (правило 6) рекурсивно
+включает `category-bank-ru`/`category-gov-ru`/`category-ecommerce-ru` — те же
+банки/госуслуги/маркетплейсы по доменам, как страховка к geoip.
 
-```
-# Банки
-tinkoff.com, t-bank.ru, alfabank.ru, sber.ru, sberbank.ru,
-online.sberbank.ru, gazprombank.ru, vtb.ru, raiffeisen.ru
+> ⚠️ В прежней версии этого документа здесь был «явный список» с **выдуманными**
+> доменами: `tinkoff.com`, `gosuslugi.com`, `sber.com`, `aeroflot.com` — таких
+> рабочих адресов **не существует**. Реальные — `tbank.ru` (после ребрендинга
+> июнь 2024) + `tinkoff.ru`, `sber.ru`, `gosuslugi.ru`, `vtb.ru`, `alfabank.ru`:
+> все на `.ru`, все на российских IP. Список удалён, правило исключено.
 
-# Госуслуги и государство
-gosuslugi.ru, gosuslugi.com, rosreestr.ru, rosreestr.gov.ru,
-nalog.ru, nalog.gov.ru, mos.ru
+**Если на практике всплывёт РФ-сервис на иностранном CDN** (Cloudflare/Akamai;
+среди топа таких нет, но теоретически возможно у мелких сервисов) — **НЕ
+выдумывать домен**, а:
+1. посмотреть реальный домен на сайте сервиса;
+2. `dig +short домен` → проверить ASN через ipinfo;
+3. если IP действительно не российский — добавить точечное правило
+   `domain → direct` выше default.
 
-# Транспорт
-rzd.ru, rzd-tour.ru, aeroflot.ru, aeroflot.com, pochta.ru
-
-# IT-гиганты на не-.ru
-yandex.com, ya.ru, vk.com, max.app, 2gis.com, hh.io
-
-# Маркетплейсы
-avito.ru, ozon.ru, ozon.com, wildberries.ru, wb.ru, megamarket.ru,
-sbermegamarket.ru, lamoda.ru, kuper.ru
-
-# Контент
-kinopoisk.ru, ivi.ru, start.ru, okko.tv, dzen.ru
-
-# Доставка/еда
-delivery-club.ru, yandex.eda, samokat.ru
-
-# Auto/недвига/работа
-drom.ru, auto.ru, cian.ru, hh.ru, headhunter.ru, youla.ru
-
-# API/CDN российских сервисов
-appmetrica.yandex.net, vk-cdn.net, vk-portal.net
-```
-
-В Xray-правиле каждый домен — `"domain:example.com"` (точное совпадение домена
-и поддоменов) или просто `"example.com"` (substring). Этот список нужно
-периодически дополнять. Хранить как часть `updateXrayConfig`-шаблона скилла
-`/configure-vpn-routing`.
+> Если захочется автообновляемый источник РФ-правил (вместо `geosite.dat` из
+> ядра) — `runetfreedom/russia-v2ray-rules-dat` (готовые `geosite.dat`/`geoip.dat`,
+> обновление каждые 6 часов). Для «золотой середины» штатных `geoip:ru` /
+> `geosite:category-ru` из ядра Xray достаточно.
 
 ---
 
 ## §6 Sniffing — обязательное условие domain-маршрутизации
 
-> 🚨 **Без sniffing на inbound domain-правила (§4 уровни 2,4,6) не работают.**
+> 🚨 **Без sniffing на inbound domain-правила (§4 правила 4 и 6 — реклама и
+> category-ru) не работают.** Это касается всех inbound, включая прокси-mixed 1080
+> (см. `/setup-server-proxy`).
 
 Когда клиент шлёт трафик, Xray на сервере видит только IP назначения (домен
 зашифрован в TLS SNI / HTTP Host). Sniffing — это инспекция первых пакетов, чтобы
@@ -297,7 +301,8 @@ appmetrica.yandex.net, vk-cdn.net, vk-portal.net
 }
 ```
 
-geoip-правила (уровни 1,3) работают и без sniffing — они по IP.
+geoip-правила (private, geoip:ru — правила 2 и 5) и bittorrent (по протоколу)
+работают и без sniffing. Domain-правила (реклама, category-ru) — только со sniffing.
 
 ---
 
@@ -365,8 +370,9 @@ https://{DOMAIN}:{PANEL_PORT}/{SUBSCRIPTION_PATH}/{CLIENT_UUID}
 }
 ```
 
-Ставится между уровнем 6 и default (§4). На клиенте ничего не меняется. Детали
-выбора загр.VPS и админских обязанностей — `vpn-consultation-flow.md` §9-10.
+Ставится между правилом 6 (category-ru) и default (§4). На клиенте ничего не
+меняется. Это **опция для продвинутых** — в базовую «золотую середину» не входит.
+Детали выбора загр.VPS и админских обязанностей — `vpn-consultation-flow.md` §9-10.
 
 ---
 

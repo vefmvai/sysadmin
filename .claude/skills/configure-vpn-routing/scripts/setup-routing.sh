@@ -1,9 +1,22 @@
 #!/bin/bash
-# setup-routing.sh — настроить routing rules в xray-конфиге:
-#  - Правило 1: РФ-трафик (geosite:category-ru + geoip:ru) → direct.
-#  - Правило 2: остальное → upstream (balancer или один outbound).
-#  - Опционально: balancer объединяет несколько upstream outbound-ов.
-#  - Опционально: observatory для leastPing-балансировки.
+# setup-routing.sh — настроить routing rules в xray-конфиге по «золотой
+# середине» (см. эталон 16-ЭТАЛОН-гибкой-маршрутизации-3xui.md §2.5).
+#
+# Генерирует 7 правил (сверху вниз, первое совпавшее применяется):
+#   1. inboundTag=api                          → api      (служебное, если есть api-inbound)
+#   2. ip=geoip:private                        → direct   (локальная сеть; НЕ blocked!)
+#   3. protocol=bittorrent                     → blocked
+#   4. domain=geosite:category-ads-all         → blocked  (реклама раньше всего)
+#   5. ip=geoip:ru                             → direct   (топ-РФ-сервисы по IP)
+#   6. domain=[geosite:category-ru, .ru/.su/.рф regex] → direct
+#   7. default (vless/mixed inbounds)          → balancerTag/outboundTag upstream
+#
+#  - Явный список РФ-доменов НЕ добавляем (research §2.6: топ-сервисы на РФ-IP,
+#    ловятся правилом 5; домены типа tinkoff.com выдуманы).
+#  - geoip:private → direct (а не объединять в одно правило и не blocked).
+#  - blackhole-outbound "blocked" создаётся, если его нет (для рекламы/bittorrent).
+#  - balancer объединяет несколько upstream outbound-ов (если >1).
+#  - observatory для leastPing/leastLoad-балансировки.
 #
 # Вход через ENV:
 #   PANEL_DOMAIN, PANEL_PORT, WEB_BASE_PATH, ADMIN_LOGIN, PASSWORD_REF
@@ -11,7 +24,7 @@
 #   BALANCER_STRATEGY   — random | roundRobin | leastPing | leastLoad (default: leastPing)
 #   USE_BALANCER        — yes | no (default: auto — yes если UPSTREAM_TAGS > 1)
 #   INBOUND_TAGS_JSON   — JSON-массив тегов inbound-ов, к которым применяется
-#                         маршрутизация (default: все vless inbound из getInbounds)
+#                         default-правило (default: все vless/mixed inbound из list)
 #
 # Выход (на stdout): JSON с описанием применённой схемы.
 
@@ -64,12 +77,80 @@ if [ -z "${INBOUND_TAGS_JSON:-}" ]; then
         | jq '[.obj[] | select(.protocol == "vless" or .protocol == "mixed") | .tag]')"
 fi
 
-# Убедимся, что direct outbound есть
+# Убедимся, что direct outbound есть (РФ-трафик выходит с IP сервера)
 HAS_DIRECT="$(echo "$CURRENT_CONFIG" | jq '[.outbounds[]? | select(.tag == "direct")] | length')"
 if [ "$HAS_DIRECT" -eq 0 ]; then
     DIRECT_OUTBOUND='{"tag":"direct","protocol":"freedom","settings":{}}'
     CURRENT_CONFIG="$(echo "$CURRENT_CONFIG" | jq --argjson o "$DIRECT_OUTBOUND" '.outbounds = ((.outbounds // []) + [$o])')"
 fi
+
+# Убедимся, что blocked outbound (blackhole) есть — нужен для правил
+# реклама → blocked и bittorrent → blocked (§2.5 правила 3,4).
+HAS_BLOCKED="$(echo "$CURRENT_CONFIG" | jq '[.outbounds[]? | select(.tag == "blocked")] | length')"
+if [ "$HAS_BLOCKED" -eq 0 ]; then
+    BLOCKED_OUTBOUND='{"tag":"blocked","protocol":"blackhole","settings":{}}'
+    CURRENT_CONFIG="$(echo "$CURRENT_CONFIG" | jq --argjson o "$BLOCKED_OUTBOUND" '.outbounds = ((.outbounds // []) + [$o])')"
+fi
+
+# --- Правила 1..6 (общие для balancer и single-upstream) -------------------
+# Порядок критичен: сверху вниз, первое совпавшее применяется (§2.5).
+#   1. inboundTag=api      → api      (служебное; добавляется ТОЛЬКО если в конфиге
+#                                      есть api-блок/inbound — иначе Xray отклонит
+#                                      правило с несуществующим outboundTag "api")
+#   2. geoip:private       → direct   (НЕ blocked)
+#   3. bittorrent          → blocked
+#   4. category-ads-all    → blocked  (реклама раньше РФ-правил)
+#   5. geoip:ru            → direct
+#   6. category-ru + regex → direct
+# Примечание про .рф: Xray regexp работает по punycode → .+\.xn--p1ai$.
+
+# Правило 1 (api) — только если панель реально использует api-сервис.
+# 3X-UI по умолчанию ставит api-inbound + api-блок, но если их нет — правило
+# с outboundTag:"api" сломает конфиг. Поэтому добавляем условно.
+HAS_API="$(echo "$CURRENT_CONFIG" | jq '
+    ((.api // null) != null)
+    or ([.inbounds[]? | select(.tag == "api")] | length > 0)
+    or ([.routing.rules[]? | select((.inboundTag // []) | index("api"))] | length > 0)
+')"
+if [ "$HAS_API" = "true" ]; then
+    API_RULE='[{"type":"field","inboundTag":["api"],"outboundTag":"api"}]'
+else
+    API_RULE='[]'
+    echo "[routing] api-блок в конфиге не найден — правило inboundTag=api пропущено" >&2
+fi
+
+HEAD_RULES="$(jq -nc --argjson apirule "$API_RULE" '$apirule + [
+    {
+        type: "field",
+        ip: ["geoip:private"],
+        outboundTag: "direct"
+    },
+    {
+        type: "field",
+        protocol: ["bittorrent"],
+        outboundTag: "blocked"
+    },
+    {
+        type: "field",
+        domain: ["geosite:category-ads-all"],
+        outboundTag: "blocked"
+    },
+    {
+        type: "field",
+        ip: ["geoip:ru"],
+        outboundTag: "direct"
+    },
+    {
+        type: "field",
+        domain: [
+            "geosite:category-ru",
+            "regexp:.+\\.ru$",
+            "regexp:.+\\.su$",
+            "regexp:.+\\.xn--p1ai$"
+        ],
+        outboundTag: "direct"
+    }
+]')"
 
 # Формируем routing rules и опционально balancer
 if [ "$USE_BALANCER" = "yes" ]; then
@@ -97,16 +178,11 @@ if [ "$USE_BALANCER" = "yes" ]; then
         OBSERVATORY_OBJ="null"
     fi
 
-    # Rules
+    # Правило 7 (default): vless/mixed inbounds → upstream-balancer
     ROUTE_RULES="$(jq -nc \
+        --argjson head "$HEAD_RULES" \
         --argjson inbounds "$INBOUND_TAGS_JSON" \
-        '[
-            {
-                type: "field",
-                outboundTag: "direct",
-                domain: ["geosite:category-ru", "regexp:.*\\\\.ru$"],
-                ip: ["geoip:ru", "geoip:private"]
-            },
+        '$head + [
             {
                 type: "field",
                 inboundTag: $inbounds,
@@ -127,19 +203,15 @@ if [ "$USE_BALANCER" = "yes" ]; then
         | if $observatory != null then .observatory = $observatory else . end
         ')"
 else
-    # Один upstream — direct routing без balancer
+    # Один upstream — без balancer, default-правило шлёт на единственный outbound
     SINGLE_UPSTREAM="$(echo "$UPSTREAM_TAGS_JSON" | jq -r '.[0]')"
 
+    # Правило 7 (default): vless/mixed inbounds → единственный upstream
     ROUTE_RULES="$(jq -nc \
+        --argjson head "$HEAD_RULES" \
         --argjson inbounds "$INBOUND_TAGS_JSON" \
         --arg upstream "$SINGLE_UPSTREAM" \
-        '[
-            {
-                type: "field",
-                outboundTag: "direct",
-                domain: ["geosite:category-ru", "regexp:.*\\\\.ru$"],
-                ip: ["geoip:ru", "geoip:private"]
-            },
+        '$head + [
             {
                 type: "field",
                 inboundTag: $inbounds,
@@ -163,18 +235,21 @@ api_restart_xray >&2
 
 echo "[routing] ✓ Routing применён" >&2
 
-# Финальный отчёт
+# Финальный отчёт (rules_count = 7 если есть api-правило, иначе 6)
+RULES_COUNT="$(echo "$ROUTE_RULES" | jq 'length')"
 jq -nc \
     --arg use_balancer "$USE_BALANCER" \
     --arg strategy "$BALANCER_STRATEGY" \
     --argjson upstream_tags "$UPSTREAM_TAGS_JSON" \
     --argjson inbound_tags "$INBOUND_TAGS_JSON" \
+    --argjson rules_count "$RULES_COUNT" \
     '{
         use_balancer: $use_balancer,
         strategy: $strategy,
         upstream_tags: $upstream_tags,
         inbound_tags: $inbound_tags,
-        rules_count: 2
+        rules_count: $rules_count,
+        model: "golden-middle (geoip:private→direct, ads→block, bittorrent→block, geoip:ru→direct, category-ru+regex→direct, default→upstream)"
     }'
 
 api_logout >&2

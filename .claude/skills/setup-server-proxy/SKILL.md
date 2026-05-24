@@ -2,8 +2,10 @@
 name: setup-server-proxy
 description: |
   Настройка серверного прокси: создание mixed inbound (SOCKS5+HTTP)
-  на 127.0.0.1:1080 в существующей панели 3X-UI, маршрутизация
-  через VPN-outbound (geoip:ru → direct, остальное → upstream),
+  на 127.0.0.1:1080 в существующей панели 3X-UI (со sniffing — иначе
+  domain-правила для серверных программ мертвы), маршрутизация через
+  VPN-outbound по модели «золотая середина» (private→direct, реклама→block,
+  geoip:ru + category-ru + regex→direct, остальное→upstream),
   systemd drop-in override для x-ui (КРИТИЧНО — без него self-loop через
   /etc/environment ломает панель), запись socks5h://-переменных
   в /etc/environment. Финальный smoke-test (api.anthropic.com через прокси,
@@ -49,9 +51,16 @@ self-loop, на котором ломается панель 3X-UI без пра
 - systemd drop-in override `/etc/systemd/system/x-ui.service.d/override.conf`
   с очисткой HTTP_PROXY/HTTPS_PROXY/NO_PROXY.
 - Mixed inbound на 127.0.0.1:1080 (или передан другой PROXY_PORT) в панели,
-  protocol=mixed, no auth, udp=false.
-- Routing rules: `inboundTag=mixed-server-proxy` + `geoip:ru/geosite:category-ru
-  /geoip:private` → `direct`; остальное → `upstream` (balancer или один outbound).
+  protocol=mixed, no auth, udp=false, **sniffing ENABLED**
+  (destOverride: http/tls/quic — иначе domain-правила для серверных программ мертвы).
+- Routing rules для `inboundTag=mixed-server-proxy` по модели «золотая середина»
+  (6 правил, scoped на mixed-inbound, порядок сверху вниз):
+  1. `geoip:private` → direct;
+  2. `bittorrent` → blocked;
+  3. `geosite:category-ads-all` → blocked (реклама);
+  4. `geoip:ru` → direct;
+  5. `geosite:category-ru` + regex `.ru/.su/.рф` → direct;
+  6. default (этот inbound) → upstream (balancer или один outbound).
 - `/etc/environment` обновлён: `http_proxy`, `https_proxy`, `no_proxy` (+ uppercase)
   с `socks5h://127.0.0.1:1080`.
 - Smoke check: `curl https://api.anthropic.com` через свежий SSH → HTTP/2;
@@ -211,23 +220,41 @@ override и доложить оператору.
 - Идемпотентно: проверяет, что mixed inbound на этом порту ещё нет.
 - Если есть — пропускает создание, использует существующий.
 - Если нет — создаёт с `listen=127.0.0.1`, `port=$PROXY_PORT`, `protocol=mixed`,
-  `auth=noauth`, `udp=false`, sniffing включён.
+  `auth=noauth`, `udp=false`, **sniffing ENABLED** (`{enabled:true,
+  destOverride:["http","tls","quic"]}`).
 
-**Verify**: `api_list_inbounds` показывает новый inbound, `port` совпадает.
+> 🚨 **Sniffing на mixed-inbound 1080 обязателен.** Без него прокси видит только
+> IP назначения, и domain-правила (реклама `category-ads-all`, банки/сервисы на
+> `.com`) для серверных программ не работают — остаётся лишь грубое деление по
+> geoip. На боевом сервере он был ВЫКЛ (баг, эталон §2.2) — скрипт всегда включает.
+
+**Verify**: `api_list_inbounds` показывает новый inbound, `port` совпадает,
+`sniffing.enabled=true`.
 
 ## Шаг 4: Routing для mixed inbound
 
 `scripts/04-add-proxy-routing.sh`:
 
 - Получает текущий xray-конфиг.
-- Добавляет **два правила** с `inboundTag=mixed-server-proxy`:
-  1. + `geoip:ru/geosite:category-ru/geoip:private` → direct.
-  2. → upstream (balancer или single outbound).
-- Идемпотентно: удаляет существующие правила с этим inboundTag перед добавлением.
+- Гарантирует наличие outbound `blocked` (blackhole) — нужен для правил реклама
+  и bittorrent.
+- Добавляет **шесть правил** модели «золотая середина», все scoped на
+  `inboundTag=mixed-server-proxy` (порядок сверху вниз):
+  1. `geoip:private` → direct (локальная сеть; НЕ blocked).
+  2. `bittorrent` → blocked.
+  3. `geosite:category-ads-all` → blocked (реклама).
+  4. `geoip:ru` → direct.
+  5. `geosite:category-ru` + regex `.ru/.su/.рф` → direct.
+  6. default (этот inbound) → upstream (balancer или single outbound).
+- Идемпотентно: удаляет существующие правила с этим inboundTag перед вставкой.
+- Вставляет блок **в начало** `routing.rules` — все правила scoped на mixed-inbound,
+  поэтому vless-трафика не касаются, а позиция в начале гарантирует корректный
+  внутренний порядок (private → ads → ru → default) для серверного прокси.
 - Авто-детект: если в текущем routing есть `balancers[]`, использует
   `balancerTag`, иначе `outboundTag`.
 
-**Verify**: `api_get_xray_config` показывает новые правила.
+**Verify**: `api_get_xray_config` показывает новые правила (6 штук с
+`inboundTag=mixed-server-proxy`).
 
 ## Шаг 5: /etc/environment
 
@@ -264,9 +291,12 @@ Inventory (`networks.md`):
 ```markdown
 ## Server-side proxy
 
-- **Тип**: SOCKS5+HTTP (Mixed inbound в 3X-UI)
+- **Тип**: SOCKS5+HTTP (Mixed inbound в 3X-UI), sniffing ENABLED
 - **Адрес**: 127.0.0.1:$PROXY_PORT (только локально)
 - **DNS**: socks5h (DNS-резолв на прокси, без локального leak)
+- **Routing**: «золотая середина» (6 правил, scoped на mixed-inbound) —
+  private→direct, реклама/bittorrent→block, geoip:ru + category-ru + regex→direct,
+  остальное → $UPSTREAM_REF
 - **Upstream**: $UPSTREAM_REF (через 3X-UI outbound)
 - **Защита**: systemd drop-in override для x-ui (предотвращает self-loop)
 - **Применение**: бот, скрипты, pip/npm/curl/git через HTTPS_PROXY env
@@ -285,8 +315,8 @@ Config (`sysadmin-config.json`):
 
 ```
 ✓ Drop-in override для x-ui применён (защита от self-loop)
-✓ Mixed inbound создан: 127.0.0.1:$PROXY_PORT (id=$ID)
-✓ Routing rules для mixed inbound: 2 правила
+✓ Mixed inbound создан: 127.0.0.1:$PROXY_PORT (id=$ID), sniffing ENABLED
+✓ Routing rules для mixed inbound: 6 правил (модель «золотая середина»)
 ✓ /etc/environment: http_proxy/https_proxy с socks5h:// (+ NO_PROXY)
 ✓ Smoke check: 5/5 PASS
 
@@ -341,6 +371,15 @@ api_call DELETE "/panel/api/inbounds/del/$MIXED_INBOUND_ID"
   читаются при login. Оператору надо exit + новый ssh, или `source /etc/environment`.
 - **Программа не уважает HTTPS_PROXY нативно (aiohttp, anthropic SDK)** — это
   баги/особенности конкретных библиотек, см. `python-libs-with-proxy.md`.
+- **Sniffing на mixed-inbound 1080 выключен** — domain-правила (реклама, банки/сервисы
+  на `.com`) для серверных программ мертвы: прокси видит только IP. На боевом сервере
+  он был ВЫКЛ (эталон §2.2). `02-create-mixed-inbound.sh` всегда создаёт inbound со
+  sniffing `{enabled:true, destOverride:["http","tls","quic"]}`.
+- **Упрощённое `geoip:ru → direct, остальное → upstream` для прокси** — старая модель
+  (до 24 мая). Реклама не резалась, regex по TLD не было. Заменено на 6-правильную
+  модель «золотая середина», scoped на mixed-inbound (эталон §2.5/§3.2).
+- **`regexp:.*\\\\.ru$` (четыре бэкслеша в jq)** — давал рантайм-regex `\\.` (литеральный
+  бэкслеш), не матчил домены. Правильно — два бэкслеша в jq-источнике (`regexp:.+\\.ru$`).
 
 # Граничные случаи
 
