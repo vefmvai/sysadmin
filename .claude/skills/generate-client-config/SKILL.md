@@ -163,21 +163,25 @@ REPORT_LANGUAGE=$(get_config_field language ru)
   - $OUTPUT_DIR/singbox-$PLATFORM.json
   - $OUTPUT_DIR/qr.png
 
-📱 Как использовать:
-  iPhone:   Открой Hiddify Proxy & VPN или Karing → "+" → "Import from clipboard"
-            или сканировать QR (Hiddify умеет камерой).
-  Android:  Открой Hiddify/NekoBox/SFA → "Add config" → URL/JSON/QR.
-  Desktop:  Hiddify Desktop → "Add Profile" → импортировать singbox-desktop.json.
+📱 Как использовать (основной клиент — Happ; sing-box JSON — для sing-box-клиентов):
+  iPhone:   Happ (основной) → импорт vless.txt / подписки / QR. Альтернативы —
+            Hiddify/Karing (для них же подходит singbox-$PLATFORM.json).
+  Android:  Happ (основной) / Hiddify / NekoBox / SFA → "Add config" → URL/JSON/QR.
+  Desktop:  Happ (скачать с happ.su) → импорт vless/подписки; либо Hiddify Desktop
+            → "Add Profile" → singbox-desktop.json.
+  Примечание: Happ на Xray-ядре принимает vless://, subscription, QR нативно;
+  sing-box JSON у него — опциональная подкладка (для sing-box-клиентов он основной).
 
-⚠ Совместимость по версиям sing-box:
+⚠ Совместимость по версиям sing-box (для sing-box-клиентов):
   - На iOS реально работает 1.11.x (sing-box-vt застрял на 1.11.4 с февраля 2025).
   - Этот конфиг сгенерирован под нижнюю планку — должен работать на iOS, Android, desktop.
+  - Happ (Xray-ядро) этим ограничением не связан.
 
-⚠ RU App Store (на 2026-05-15):
-  - Hiddify Proxy & VPN — доступен.
-  - Karing — доступен.
-  - Streisand, Happ, v2RayTun — удалены 27-28 марта 2026.
-  → При новой установке на iPhone в РФ — ставь Hiddify или Karing.
+⚠ RU App Store (на 2026-05-24):
+  - В RU App Store сейчас НЕТ ни Happ, ни Hiddify (наблюдение оператора).
+  - Streisand, Happ, v2RayTun — удалены ещё в волне 27-28 марта 2026.
+  → При новой установке на iPhone — ставь основной Happ через СМЕНУ РЕГИОНА
+    App Store (то же для Hiddify/Karing). На десктоп Happ — просто с happ.su.
 ```
 
 # Откат

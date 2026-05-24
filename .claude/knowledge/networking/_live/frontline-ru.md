@@ -87,7 +87,7 @@ sources_checked:
 
 - ✅ **Multi-hop клиент → RU-VPS → загр.VPS**: работает (трансграничный B2B-трафик режется мягче, чем клиент→загр). См. `_reference/vpn-protocols.md` §4. Уязвимое звено — RU-сервер (см. § Под угрозой).
 - ✅ **Reality с правильным donor** (без CDN в РФ — Microsoft с 2022 без CDN, github и т.п.). См. `_reference/fronting-strategies.md`.
-- ✅ **Использование iOS-клиентов Hiddify и Karing** (на 2026-05-17 не удалены из RU App Store). См. `_reference/client-apps.md`.
+- ✅ **iOS-клиенты через смену региона App Store.** Основной рекомендованный клиент — **Happ** (happ.su, кроссплатформенный); альтернативы — Hiddify, Karing. ⚠️ Обновление 2026-05-24 (наблюдение оператора): в RU App Store сейчас **нет ни Happ, ни Hiddify** — для установки любого клиента на iPhone нужна смена региона App Store; на десктоп Happ ставится с happ.su. Подробно — `_reference/client-apps.md`, событие — `timeline.md` (2026-05-24).
 
 ---
 
@@ -203,7 +203,7 @@ sources_checked:
 | Мобильный (МТС/Мегафон/Билайн/T2) | Multi-hop через RU-VPS → загр.VPS; или AmneziaWG 2.0 напрямую | XHTTP за Cloudflare (с оговоркой 16-KB curtain) | MEDIUM |
 | Корпоративный (white-listed) | Только белый IP в реестре РКН | — (только legal путь) | HIGH |
 | Доступ к российским платформам с VPN | Отключать VPN для Sber/Yandex/VK/Ozon/WB/Госуслуг/РЖД/Aviasales | Split-tunneling с geosite:category-ru → direct | HIGH |
-| iOS-клиент | Hiddify (приоритет) или Karing — оба ещё в RU App Store на 2026-05-17 | — | HIGH |
+| iOS-клиент | **Happ** (основной, happ.su) — ставить через смену региона App Store (в RU App Store на 2026-05-24 нет ни Happ, ни Hiddify) | Hiddify / Karing (тоже через смену региона) | HIGH (клиент); MEDIUM (статус стора — наблюдение, меняется волнами) |
 | Anthropic/OpenAI API с сервера в РФ | `/setup-server-proxy` через свой загр.VPS | — | HIGH (см. также `setup-server-proxy` скилл) |
 
 ---
