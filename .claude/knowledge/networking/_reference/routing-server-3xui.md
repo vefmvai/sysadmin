@@ -31,7 +31,7 @@ sources_checked:
 
 ## §0 Почему split на сервере — дефолт (а не на клиенте)
 
-Исторически памятка курса предлагала split **на клиенте** через Hiddify
+Исторически эта памятка предлагала split **на клиенте** через Hiddify
 («Hiddify смотрит на каждый запрос и решает куда»). **На практике это не
 настраивается надёжно:** Hiddify не исполняет произвольные raw route-правила
 так, как от него ожидали — он строит конфиг сам из подписки и пресетов и не даёт
@@ -403,4 +403,4 @@ curl -s --interface direct ifconfig.me   # концептуально; на пр
 - **Клиенты подключения:** `client-apps.md` (какой клиент что принимает)
 - **Фронт блокировок:** `_live/frontline-ru.md`
 - **Скиллы:** `/configure-vpn-routing`, `/setup-vpn-panel`, `/generate-client-config`, `/setup-server-proxy`
-- **Визуальные схемы:** `_diagrams/vpn-architecture-student.md`
+- **Визуальные схемы:** `_diagrams/vpn-architecture-reference.md`
