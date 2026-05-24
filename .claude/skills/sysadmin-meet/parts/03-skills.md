@@ -107,8 +107,10 @@ pip, curl, git на сервере могли ходить в Anthropic API / Op
 **`/generate-client-config`** — Генерация конфигов для устройств. Из существующего
 клиента в твоей панели делает: vless://-ссылку, sing-box JSON под платформу
 (iPhone / Android / desktop), QR-код для сканирования. Учитывает iOS-боль (старая
-версия sing-box внутри клиента) и удаление VPN-приложений из RU App Store —
-рекомендует Hiddify или Karing.
+версия sing-box внутри клиента) и ситуацию с RU App Store — основной
+рекомендованный клиент **Happ** (happ.su), альтернативы — Hiddify / Karing
+(на 2026-05-24 в RU App Store нет ни Happ, ни Hiddify; для iPhone — смена региона
+App Store, на десктоп Happ ставится с happ.su; подробнее — ADR-0007).
 *Когда нужно:* добавил нового клиента — нужно прислать ему ссылку или QR.
 
 **`/refresh-vpn-knowledge`** — Актуализация знаний агента про VPN и блокировки.

@@ -1,7 +1,7 @@
 # <!-- DOC_TYPE: services|networks|volumes|databases|domains|cron|host-scripts|automations|server -->
 
 <!--
-Шаблон для генерации одного из 8 inventory-документов.
+Шаблон для генерации одного из 9 inventory-документов.
 Скилл inventory-scan использует этот шаблон, когда документ ещё не существует
 в `inventory/hosts/<host>/`. Если документ уже есть — НЕ перезаписываем,
 а правим через Edit с пометкой `<!-- snapshot YYYY-MM-DD: было X, стало Y -->`.
