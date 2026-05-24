@@ -41,7 +41,7 @@ allowed-tools: Bash, Read, Edit, Write
 | Параметр        | Default      | Описание                                                          |
 | --------------- | ------------ | ----------------------------------------------------------------- |
 | `OS`            | autodetect   | `macos` / `linux-headless` / `linux-desktop` / `windows`           |
-| `VAULT_TYPE`    | (interactive; если есть `sysadmin-config.json` — берётся из `secrets.manager`) | `keychain` / `pass` / `keepassxc` / `bitwarden` |
+| `VAULT_TYPE`    | (interactive; если есть `sysadmin-config.json` — берётся из `secrets.manager`) | `keychain` / `pass` / `keepassxc` / `bitwarden` / `1password` / `other` |
 | `INVENTORY_DIR` | `inventory`  | Куда положить `access.md`                                         |
 | `PROJECT_ROOT`  | `$PWD`       | Корень проекта (где лежит `.git/`)                                |
 | `--force`       | (off)        | Игнорировать значение `secrets.manager` из конфига и перейти в Decision Tree |
@@ -145,8 +145,21 @@ IF OS == windows:
 | `pass`         | `scripts/install-pass.sh`             | `apt-get install pass gnupg2`, генерация GPG-ключа, `pass init` |
 | `keepassxc`    | `scripts/install-keepassxc.sh`        | `apt-get install keepassxc` (Linux) или `brew install keepassxc` (macOS) |
 | `bitwarden`    | (ссылка на инструкцию)                | Регистрация на bitwarden.com + `bw login` — НЕ автоматизируем |
+| `other`        | (см. ниже)                            | Зависит от `secrets.cli_available` — есть CLI или только указатели |
 
 **Bitwarden — особый случай:** требует регистрации в облаке (или self-hosted vaultwarden), мы не автоматизируем регистрацию. Скилл даёт ссылку на официальную документацию и подтверждает работоспособность через `bw status`.
+
+**`other` — нестандартный менеджер (Kaspersky, Dashlane, браузерный и т.п.):**
+Читаю `secrets.manager_name` и `secrets.cli_available` из конфига.
+- **`cli_available: true`** (ресёрч в `/sysadmin-init` нашёл CLI) → спрашиваю оператора
+  точную команду CLI для записи/чтения секрета, проверяю её доступность, дальше работаю
+  через неё. Smoke-test адаптирую под эту команду.
+- **`cli_available: false`** (CLI нет — типично) → **НЕ пытаюсь автоматизировать**. Только
+  настраиваю `inventory/access.md` как реестр указателей: «секрет X → открой
+  `<manager_name>` под именем Y». При каждой операции, где нужен секрет, прошу оператора
+  достать его руками из `<manager_name>` и прислать. Это явно проговариваю как ограничение,
+  не как баг. Если оператор устал передавать руками — предлагаю перейти на Bitwarden
+  (`/sysadmin-init --reconfigure`).
 
 ## Шаг 4: Создание `inventory/access.md` из шаблона
 

@@ -4,6 +4,29 @@
 версии — по [SemVer](https://semver.org/lang/ru/). Версия мозга — в файле `VERSION`,
 релизы помечены git-тегами `vX.Y.Z`.
 
+## [1.1.1] — 2026-05-24
+
+Гибкость менеджеров паролей. По итогам диагностики пользователя на Windows: он
+использует Kaspersky Password Manager, которого не было в закрытом enum схемы
+(`keychain|bitwarden|1password|pass`) → конфиг невалиден → агент не запускался.
+Та же болезнь жёсткого списка, что лечили в 1.1.0 (хардкод вместо гибкости).
+
+### Добавлено
+- В enum `secrets.manager`: `keepassxc` (скрипт установки уже был, но в enum отсутствовал)
+  и `other` — для любого нестандартного менеджера (Kaspersky, Dashlane, NordPass, браузерный).
+- Поля `secrets.manager_name` (имя нестандартного менеджера) и `secrets.cli_available`
+  (умеет ли Claude доставать секреты автоматически).
+- В `/sysadmin-init`: для `other` агент проводит ресёрч (WebSearch) — есть ли у менеджера
+  CLI; честно объясняет расклад (нет CLI → пароли передаёшь руками) и предлагает
+  альтернативу Bitwarden. Выбор за оператором. Запрет выдумывать наличие CLI.
+- Агент учитывает `cli_available`: при `false` НЕ пытается доставать секреты сам, только
+  указывает оператору, где взять руками (cold-start + setup-secrets-vault).
+
+### Изменено
+- `validate-config.sh`: jq-fallback принимает 6 менеджеров, требует `manager_name` при `other`.
+  WARN про отсутствие check-jsonschema переформулирован в непугающий («необязательно»,
+  не «ошибка») — jq-fallback достаточен, check-jsonschema остаётся опциональной надстройкой.
+
 ## [1.1.0] — 2026-05-24
 
 Кроссплатформенность установки и принцип «не смог — скажи прямо». По итогам инцидента
@@ -47,6 +70,7 @@
 - Персона агента (конституция C.1–C.8, политика трёх зон), 18 скиллов, knowledge-база,
   JSON Schema конфига, публичный шаблон, INSTALL/sysadmin-init/sysadmin-meet.
 
+[1.1.1]: https://github.com/vefmvai/sysadmin/releases/tag/v1.1.1
 [1.1.0]: https://github.com/vefmvai/sysadmin/releases/tag/v1.1.0
 [1.0.1]: https://github.com/vefmvai/sysadmin/releases/tag/v1.0.1
 [1.0.0]: https://github.com/vefmvai/sysadmin/releases/tag/v1.0.0

@@ -62,10 +62,24 @@
       "properties": {
         "manager": {
           "type": "string",
-          "enum": ["keychain", "bitwarden", "1password", "pass"],
-          "description": "Где оператор хранит секреты. keychain — встроенный в macOS Keychain (по умолчанию для Mac). bitwarden — облачный менеджер с CLI bw. 1password — облачный менеджер с CLI op. pass — Unix password manager на gpg (для Linux-headless)."
+          "enum": ["keychain", "bitwarden", "1password", "pass", "keepassxc", "other"],
+          "description": "Где оператор хранит секреты. keychain — встроенный в macOS Keychain (default для Mac). bitwarden — облачный, CLI bw (кроссплатформенный, рекомендация для нестандартных кейсов). 1password — облачный, CLI op. pass — Unix password manager на gpg. keepassxc — локальная база .kdbx, CLI keepassxc-cli. other — любой другой менеджер (Kaspersky, Dashlane, NordPass, браузерный и т.п.); тогда заполни manager_name и cli_available."
+        },
+        "manager_name": {
+          "type": "string",
+          "description": "Человекочитаемое имя менеджера, когда manager=other. Например: «Kaspersky Password Manager», «Dashlane», «NordPass». Агент использует его в указателях на секреты («пароль от X — смотри в <manager_name>»)."
+        },
+        "cli_available": {
+          "type": "boolean",
+          "description": "Есть ли у менеджера CLI, через который Claude может автоматически доставать секреты. true — агент может читать секреты сам (keychain/bitwarden/1password/pass/keepassxc обычно true). false — CLI нет (типично для Kaspersky/браузерных): агент НЕ достаёт секреты автоматически, только указывает оператору, где взять руками. Если поле опущено — агент считает CLI недоступным для manager=other и доступным для известных менеджеров."
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "manager": { "const": "other" } } },
+          "then": { "required": ["manager", "manager_name"] }
+        }
+      ]
     },
     "monitoring": {
       "type": "object",

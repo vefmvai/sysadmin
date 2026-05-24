@@ -41,8 +41,11 @@ if command -v check-jsonschema >/dev/null 2>&1; then
 fi
 
 # --- Способ 2: jq-fallback (минимальная проверка) ---
-echo "WARN: check-jsonschema не установлен, использую jq-fallback (минимальная проверка)."
-echo "      Для полной валидации: pipx install check-jsonschema"
+# check-jsonschema — НЕОБЯЗАТЕЛЬНАЯ надстройка (строгая валидация по JSON Schema).
+# jq-fallback ниже покрывает все реальные риски этого конфига (обязательные поля, enum'ы).
+# Поэтому здесь не «ошибка», а спокойная заметка — установка check-jsonschema опциональна.
+echo "(i) check-jsonschema не установлен — использую встроенную проверку на jq (этого достаточно)."
+echo "    Если хочешь углублённую валидацию по схеме — опционально: pipx install check-jsonschema"
 
 if ! command -v jq >/dev/null 2>&1; then
     echo "ERROR: jq не установлен. brew install jq (macOS) или apt-get install jq (Linux)."
@@ -72,11 +75,19 @@ case "$LANG" in
     *) echo "FAIL: language = $LANG, ожидалось ru или en"; exit 1 ;;
 esac
 
-# 4. secrets.manager ∈ {keychain, bitwarden, 1password, pass}
+# 4. secrets.manager ∈ {keychain, bitwarden, 1password, pass, keepassxc, other}
 MANAGER=$(jq -r '.secrets.manager' "$CONFIG")
 case "$MANAGER" in
-    keychain|bitwarden|1password|pass) ;;
-    *) echo "FAIL: secrets.manager = $MANAGER, ожидалось keychain|bitwarden|1password|pass"; exit 1 ;;
+    keychain|bitwarden|1password|pass|keepassxc) ;;
+    other)
+        # Для other обязательно manager_name (имя нестандартного менеджера)
+        MGR_NAME=$(jq -r '.secrets.manager_name // ""' "$CONFIG")
+        if [ -z "$MGR_NAME" ]; then
+            echo "FAIL: secrets.manager = other, но не задано secrets.manager_name (имя менеджера)."
+            exit 1
+        fi
+        ;;
+    *) echo "FAIL: secrets.manager = $MANAGER, ожидалось keychain|bitwarden|1password|pass|keepassxc|other"; exit 1 ;;
 esac
 
 # 5. operator.name и operator.timezone — непустые строки

@@ -8,7 +8,7 @@ description: |
   Триггеры: «настрой агента», «первый запуск», «init agent», «/sysadmin-init», «хочу как у Василия»,
   «перенастрой конфиг», «поменять язык агента», «переключить менеджер паролей».
   НЕ для знакомства с агентом (sysadmin-meet); НЕ для настройки серверов (bootstrap-new-server).
-allowed-tools: AskUserQuestion, Bash, Read, Write, Edit
+allowed-tools: AskUserQuestion, Bash, Read, Write, Edit, WebSearch
 ---
 
 <role>
@@ -225,8 +225,9 @@ draft-конфиг `$WORKDIR/sysadmin-config-draft.json`, промежуточн
 
 ## Шаг 3: Раунд 2 — Менеджер паролей (СЕНЬОР-ОБЁРТКА)
 
-**Поле:** `secrets.manager` (radio из enum: `keychain` / `bitwarden` /
-`1password` / `pass`).
+**Поля:** `secrets.manager` (enum: `keychain` / `bitwarden` / `1password` /
+`pass` / `keepassxc` / `other`), для `other` — также `secrets.manager_name`
+и `secrets.cli_available`.
 **Дефолт:** по OS — `keychain` для macOS, `pass` для Linux.
 
 **Краткая обёртка** (полная — `references/wizard-flow.md` §«Раунд 2»
@@ -236,12 +237,53 @@ draft-конфиг `$WORKDIR/sysadmin-config-draft.json`, промежуточн
 > «Менеджер паролей — где хранить токены/ключи (НЕ `.env`!). Принцип
 > репо — только указатели «пароль от X — смотри Keychain под именем Y».
 > Если macOS — `keychain` (встроен). Если Linux — `pass` (минимум
-> зависимостей) или `bitwarden` (синхронизация между машинами). Можешь
-> ответить «как советуешь».»
+> зависимостей) или `bitwarden` (синхронизация между машинами).
+> Если пользуешься другим (Kaspersky, Dashlane, NordPass, браузерный) —
+> выбери «другой», разберёмся вместе. Можешь ответить «как советуешь».»
 
-Записываю в `secrets.manager`. Подсказка после: «Реальные значения паролей
-сюда не пишу — они появятся в выбранном менеджере, когда запустишь
-`/setup-secrets-vault`.»
+Вопрос через `AskUserQuestion` — варианты: известные менеджеры + «Другой
+(назову свой)». Записываю в `secrets.manager`.
+
+### Ветка «Другой менеджер» (manager=other) — research CLI + честный выбор
+
+Если оператор выбрал «Другой» или назвал менеджер не из списка:
+
+1. **Спрашиваю имя** менеджера → пишу в `secrets.manager_name` (например
+   «Kaspersky Password Manager»).
+2. **Провожу ресёрч** (WebSearch): есть ли у этого менеджера CLI, через который
+   программа может читать секреты (запрос вида «<имя> password manager CLI
+   command line export»). Не выдумываю ответ — если не нашёл достоверно, считаю
+   «CLI нет/неизвестен».
+3. **Объясняю расклад честно** (сеньор-обёртка), два сценария:
+
+   **Есть CLI** → «У <имя> есть CLI `<команда>`. Тогда я смогу доставать секреты
+   автоматически. Записываю `cli_available: true`. На шаге `/setup-secrets-vault`
+   настроим.»
+
+   **Нет CLI** (типично для Kaspersky/браузерных) → честно:
+   > «У <имя> нет CLI, через который я мог бы доставать пароли автоматически.
+   > Это значит: каждый раз, когда понадобится секрет, **ты будешь сам открывать
+   > <имя>, копировать пароль и присылать мне** — медленно и неудобно при частых
+   > операциях (деплой, бэкапы, ротация).
+   >
+   > Альтернатива: менеджер, с которым я умею работать сам — например **Bitwarden**
+   > (мощный, бесплатный, кроссплатформенный — Windows/Mac/Linux, есть CLI `bw`).
+   > Можешь продолжать хранить пароли в <имя> для личного, а для инфраструктуры
+   > завести Bitwarden — тогда я буду автономным.
+   >
+   > Решай сам: **(а)** остаюсь на <имя>, секреты передаёшь руками (пишу
+   > `cli_available: false`); **(б)** перехожу на Bitwarden (меняю `manager` на
+   > `bitwarden`). Что выбираешь?»
+
+4. Записываю по выбору: либо `manager=other` + `manager_name` + `cli_available`,
+   либо `manager=bitwarden` (если оператор согласился перейти).
+
+**Для известных менеджеров** (keychain/bitwarden/1password/pass/keepassxc) —
+`cli_available: true` (у всех есть CLI), `manager_name` не нужен.
+
+Подсказка после записи: «Реальные значения паролей сюда не пишу — они появятся
+в выбранном менеджере, когда запустишь `/setup-secrets-vault`. Если CLI нет —
+я буду указывать, где взять пароль руками, а не доставать его сам.»
 
 ## Шаг 4: Раунд 3 — Сервер (servers[])
 
@@ -360,11 +402,24 @@ hostname (regex `^[a-z0-9.-]+$`).
 `backups.rclone_remote`, `backups.retention`, `notifications.telegram.*`) только если
 оператор включил соответствующую подсистему.
 
+**Блок `secrets`:** всегда пишу `secrets.manager`. Для известных менеджеров добавляю
+`secrets.cli_available = true`. Для `manager=other` — обязательно `secrets.manager_name`
+(имя из ответа) и `secrets.cli_available` (результат ресёрча CLI из Раунда 2).
+
 ```bash
 DRAFT="$WORKDIR/sysadmin-config-draft.json"
 cp "$SYSADMIN_ROOT/.claude/skills/sysadmin-init/templates/config-skeleton.json" "$DRAFT"
 # далее серия jq-команд по ответам оператора
 jq --arg n "$NAME" '.operator.name = $n' "$DRAFT" > "$WORKDIR/x" && mv "$WORKDIR/x" "$DRAFT"
+# Менеджер паролей. Для известных менеджеров CLI есть всегда → cli_available=true.
+# Для other — значение из ресёрча Раунда 2 (true если нашёл CLI, иначе false).
+case "$MANAGER" in
+    keychain|bitwarden|1password|pass|keepassxc) CLI_AVAILABLE=true ;;
+    other) : ;;  # CLI_AVAILABLE уже задан в Раунде 2 по результату ресёрча
+esac
+jq --arg m "$MANAGER" --argjson cli "$CLI_AVAILABLE" \
+   '.secrets.manager = $m | .secrets.cli_available = $cli' "$DRAFT" > "$WORKDIR/x" && mv "$WORKDIR/x" "$DRAFT"
+[ "$MANAGER" = "other" ] && { jq --arg mn "$MANAGER_NAME" '.secrets.manager_name = $mn' "$DRAFT" > "$WORKDIR/x" && mv "$WORKDIR/x" "$DRAFT"; }
 # ... и т.д.
 ```
 
