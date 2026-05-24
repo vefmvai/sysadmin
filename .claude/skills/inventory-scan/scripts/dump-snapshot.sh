@@ -146,9 +146,13 @@ REDACTION_VERSION="v1"
 redact_stream() {
     # 1. KEY=value, где KEY оканчивается на TOKEN/KEY/SECRET/PASSWORD/PASS/API (case-insensitive)
     # 2. credentials в URL: scheme://user:pass@host -> scheme://user:<REDACTED>@host
+    # 3. секрет в query-string URL: ?secret=...&token=... -> ?secret=<REDACTED>
+    #    (граблекейс selectel: cron-задача с curl "...?secret=B+SLNc55..." утекала
+    #    открытым текстом в crontab.txt — KEY=value и url:pass@ её не ловили).
     sed -E \
         -e 's/("?[A-Za-z0-9_]*(TOKEN|KEY|SECRET|PASSWORD|PASS|API)"?[[:space:]]*[=:][[:space:]]*"?)[^"[:space:],}]+/\1<REDACTED>/Ig' \
-        -e 's#(([A-Za-z][A-Za-z0-9+.-]*)://[^:@/[:space:]]+:)[^@/[:space:]]+@#\1<REDACTED>@#g'
+        -e 's#(([A-Za-z][A-Za-z0-9+.-]*)://[^:@/[:space:]]+:)[^@/[:space:]]+@#\1<REDACTED>@#g' \
+        -e 's/([?&](secret|token|key|password|passwd|access_token|api_key|apikey|sig|signature)=)[^&"'"'"'[:space:]]+/\1<REDACTED>/Ig'
 }
 
 # Маскировка JSON через jq, если он доступен: значения .Config.Env и .Env,
@@ -184,12 +188,19 @@ fi
 
 # === Вспомогательная функция записи секции ===
 # run_remote <имя_файла> <команда>
+#
+# КАЖДАЯ секция проходит через redact_stream ДО записи на диск. Раньше
+# redaction применялся только к containers-inspect.json и host-env-redacted.txt,
+# а остальные секции (crontab, host-scripts-content, nginx-sites) писались
+# сырыми — и секрет в query-string cron-задачи утекал открытым текстом
+# (граблекейс selectel). Теперь redaction — общий рубеж для всех run_remote,
+# а meta.txt:redaction_applied=true перестаёт вводить в заблуждение.
 run_remote() {
     local label="$1"
     local cmd="$2"
     local outfile="${SNAPSHOT_DIR}/${label}"
     echo "  -> ${label}..."
-    if ! run_cmd "$cmd" > "$outfile" 2>&1; then
+    if ! run_cmd "$cmd" 2>&1 | redact_stream > "$outfile"; then
         echo "     ПРЕДУПРЕЖДЕНИЕ: не удалось выполнить ${label}"
         echo "ERROR: ${cmd}" >> "$outfile"
     fi
@@ -262,8 +273,16 @@ run_remote "tls-certs.txt" \
     "set +e; find /etc/letsencrypt/live -name 'cert.pem' 2>/dev/null | while read f; do echo \"=== \$f ===\"; openssl x509 -in \"\$f\" -noout -subject -dates 2>/dev/null; done; ls -la ~/.acme.sh/*/fullchain.cer 2>/dev/null | head -50; true"
 
 # 10. Список хостовых скриптов (метаданные, без содержимого)
+#     set +e + true: пустые glob'ы (/opt/*.yml, /root/bin/) дают ls ненулевой
+#     код, и под set -o pipefail вся секция ложно помечалась как failed
+#     (граблекейс selectel: данные собирались, но в конец файла дописывался
+#     'ERROR: ...'). Honest-status: секция падает только при реальной ошибке.
 run_remote "host-scripts-list.txt" \
-    "ls -la /opt/*.sh /opt/*.py /opt/*.yml 2>/dev/null; ls -la /usr/local/bin/*.sh /usr/local/sbin/*.sh 2>/dev/null; ls -la /root/bin/ 2>/dev/null"
+    "set +e
+     ls -la /opt/*.sh /opt/*.py /opt/*.yml 2>/dev/null
+     ls -la /usr/local/bin/*.sh /usr/local/sbin/*.sh 2>/dev/null
+     ls -la /root/bin/ 2>/dev/null
+     true"
 
 # 11. Содержимое хостовых скриптов в /opt (.sh)
 # shellcheck disable=SC2016
@@ -324,7 +343,7 @@ run_remote "systemd-timers.txt" \
      timers=\$(systemctl list-unit-files --type=timer --no-pager 2>/dev/null \\
        | awk '{print \$1}' \\
        | grep -E '\\.timer\$' \\
-       | grep -vE '^(systemd-|sys-|snap\\.|apt-|man-db|logrotate|fstrim|e2scrub|fwupd|motd|dpkg|plocate|update-notifier|anacron)' )
+       | grep -vE '^(systemd-|sys-|snap\\.|snapd\\.|apt-|man-db|logrotate|fstrim|e2scrub|fwupd|motd|dpkg|plocate|update-notifier|anacron|chrony-|chronyd|mdadm-|mdcheck|mdmonitor|ua-timer|ua_|ubuntu-advantage|raid-check|btrfs|smartd)' )
      if [ -z \"\$timers\" ]; then
        echo 'пусто (нет таймеров оператора)'
      else
@@ -337,14 +356,23 @@ run_remote "systemd-timers.txt" \
      true"
 
 # 16. Скрипты-наблюдатели (watchers) — долгоживущие процессы, слушающие события
-#     (inotify/fswatch/watchdog), в отличие от запуска по расписанию.
+#     файловой системы (inotify/fswatch/python-watchdog), в отличие от запуска
+#     по расписанию.
+#     ВАЖНО (граблекейс selectel): НЕ ловим hardware watchdog (watchdogd,
+#     /usr/sbin/watchdog) — это демон слежения за зависанием ядра, а не
+#     наблюдатель за файлами; иначе на карте появляется фантомная «автоматизация».
+#     Паттерн сужен до настоящих file-watcher'ов; голый 'watchdog' исключён,
+#     оставлен 'watchmedo' (CLI python-watchdog) и второй grep отсекает
+#     hardware-демон по полному пути.
 #     set +e: ps/grep на пустом наборе возвращают ненулевой код — это не ошибка.
 run_remote "watchers.txt" \
     "set +e
-     echo '=== процессы-наблюдатели (event-driven) ==='
-     out=\$(ps -eo comm,args 2>/dev/null | grep -E 'inotifywait|inotifywatch|fswatch|watchmedo|watchdog' | grep -v grep)
+     echo '=== процессы-наблюдатели (event-driven, file-watch) ==='
+     out=\$(ps -eo comm,args 2>/dev/null \\
+       | grep -E 'inotifywait|inotifywatch|fswatch|watchmedo' \\
+       | grep -vE 'grep|/usr/sbin/watchdog|\\bwatchdogd\\b')
      if [ -z \"\$out\" ]; then
-       echo 'пусто (наблюдателей не найдено)'
+       echo 'пусто (file-watcher'\\''ов не найдено)'
      else
        echo \"\$out\"
      fi
