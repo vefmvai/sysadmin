@@ -1,4 +1,4 @@
-# <!-- DOC_TYPE: services|networks|volumes|databases|domains|cron|host-scripts|server -->
+# <!-- DOC_TYPE: services|networks|volumes|databases|domains|cron|host-scripts|automations|server -->
 
 <!--
 Шаблон для генерации одного из 8 inventory-документов.
@@ -39,7 +39,15 @@ databases.md    — | db_name | container | port | role | size |
 domains.md      — | domain | dns_target | tls_source | nginx_block |
 cron.md         — | schedule | command | log | owner |
 host-scripts.md — | script | mode | owner | calls | status |
+automations.md  — | name | trigger | schedule | runs | touches | log | status |
 server.md       — | parameter | value | source |
+
+automations.md — сводная витрина ВСЕХ автоматизаций сервера независимо от механизма
+запуска (cron + systemd-timer + watcher + webhook + ручной запуск). Агрегирует cron.md
+и host-scripts.md, добавляет timers/watchers — НЕ копирует их слово в слово.
+Колонка `touches` (что трогает: БД / сервис / внешний API) — источник связей для
+диаграммы automations.mmd. Значения trigger: cron / systemd-timer / watcher / webhook /
+manual. status: active / failing / disabled / `? уточнить`.
 -->
 
 ## Drift с предыдущим snapshot

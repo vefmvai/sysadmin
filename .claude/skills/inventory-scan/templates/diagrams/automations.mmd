@@ -1,0 +1,78 @@
+%% automations.mmd — карта автоматизаций сервера
+%%
+%% Показывает ВСЁ, что работает само: что и чем запускается, и что оно
+%% трогает. Три колонки слева направо:
+%%   - триггеры   — расписание (cron/systemd-timer), события (watcher/webhook),
+%%                  ручной запуск;
+%%   - автоматизации — скрипты и pipeline, каждый подписан именем;
+%%   - что трогают — БД из shared-db, сервисы из apps, внешние API
+%%                  (Telegram, RSS, Claude API).
+%%
+%% Заполняется скиллом /inventory-scan на основе:
+%%   - inventory/hosts/<host>/automations.md (главный источник — колонка touches
+%%     даёт связи справа)
+%%   - inventory/hosts/<host>/cron.md, host-scripts.md (детали)
+%%   - snapshots/<date>/systemd-timers.txt, watchers.txt (timers и наблюдатели)
+%%
+%% Условия генерации:
+%%   Файл создаётся, ТОЛЬКО ЕСЛИ на сервере есть хоть одна автоматизация
+%%   (непустой automations.md). Если автоматизаций нет — файл не создаётся
+%%   / удаляется (по образцу vpn-architecture.mmd при vpn.enabled=false).
+%%
+%% Условные обозначения:
+%%   -.запускает.->  триггер → автоматизация (пунктир)
+%%   -->             автоматизация → что трогает (сплошная)
+%%   classDef automation (фиолетовый) — сами автоматизации
+%%   classDef trigger (серый) — триггеры; db/app/external — как в topology
+
+flowchart LR
+    %% === Триггеры (как запускается) ===
+    subgraph TRIGGERS["Триггеры"]
+        direction TB
+        CronT["cron<br/><schedule-1>"]:::trigger
+        TimerT["systemd-timer<br/><timer-1>"]:::trigger
+        WatchT["watcher<br/><event-1>"]:::trigger
+        ManualT["ручной запуск"]:::trigger
+    end
+
+    %% === Автоматизации (что именно крутится) ===
+    subgraph AUTO["Автоматизации"]
+        direction TB
+        A1["<automation-1><br/>(<runs-1>)"]:::automation
+        A2["<automation-2><br/>(<runs-2>)"]:::automation
+        Pipe["<pipeline-1><br/>(<runs-pipe>)"]:::automation
+    end
+
+    %% === Что трогают (touches) ===
+    subgraph TOUCHES["Что трогают"]
+        direction TB
+        DB[(<postgres>)]:::db
+        Svc["<service-1>"]:::app
+        ExtTg([Telegram API]):::external
+        ExtClaude([Claude API]):::external
+        ExtRss([RSS-источник]):::external
+    end
+
+    %% === Связи: триггер -.запускает.-> автоматизация ===
+    CronT -.запускает.-> A1
+    TimerT -.запускает.-> A2
+    WatchT -.запускает.-> Pipe
+    ManualT -.запускает.-> Pipe
+
+    %% === Связи: автоматизация --> что трогает ===
+    A1 --> DB
+    A1 --> ExtTg
+    A2 --> Svc
+    Pipe --> ExtRss
+    Pipe --> ExtClaude
+    Pipe --> DB
+    Pipe --> ExtTg
+
+    %% === Стили (цветовая семантика — единый язык с topology) ===
+    classDef trigger fill:#f3f4f6,stroke:#6b7280,color:#000
+    classDef automation fill:#ede9fe,stroke:#7c3aed,color:#000
+    classDef app fill:#bbf7d0,stroke:#16a34a,color:#000
+    classDef db fill:#fef3c7,stroke:#d97706,color:#000
+    classDef external fill:#e8e8e8,stroke:#666,color:#000
+
+%% Last updated: <YYYY-MM-DD> by /inventory-scan

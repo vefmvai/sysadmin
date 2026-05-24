@@ -9,11 +9,15 @@
 %%   - inventory/hosts/<host>/domains.md (внешние домены)
 %%
 %% Группы сервисов (стандартные):
-%%   - apps       — продуктовые приложения
-%%   - shared-db  — общие БД
-%%   - monitoring — мониторинг-стек
-%%   - vpn        — VPN-инфраструктура
-%%   - infra      — служебные (nginx, bot-frps и т.п.)
+%%   - apps        — продуктовые приложения
+%%   - shared-db   — общие БД
+%%   - monitoring  — мониторинг-стек
+%%   - vpn         — VPN-инфраструктура
+%%   - automations — что работает само (cron/timer/watcher/pipeline);
+%%                   группа появляется ТОЛЬКО при непустом automations.md.
+%%                   Здесь — факт наличия + ключевые связи; детали по
+%%                   триггерам живут в automations.mmd.
+%%   - infra       — служебные (nginx, bot-frps и т.п.)
 
 flowchart LR
     %% === Внешний мир ===
@@ -42,6 +46,12 @@ flowchart LR
             VPNPanel[<vpn-panel>]:::vpn
         end
 
+        %% Появляется только при непустом automations.md.
+        %% Детализация триггеров — в automations.mmd.
+        subgraph AUTOMATIONS["automations"]
+            Pipeline[<pipeline-or-cron>]:::automation
+        end
+
         Nginx[nginx · reverse-proxy]:::infra
     end
 
@@ -58,10 +68,15 @@ flowchart LR
     App2 --> Postgres
     App1 --> Redis
 
+    %% Ключевые связи автоматизаций (высокий уровень; детали в automations.mmd)
+    Pipeline --> Postgres
+    Pipeline -.шлёт.-> Internet
+
     %% === Стили (цветовая семантика) ===
     classDef external fill:#e8e8e8,stroke:#666,color:#000
     classDef app fill:#bbf7d0,stroke:#16a34a,color:#000
     classDef db fill:#fef3c7,stroke:#d97706,color:#000
     classDef mon fill:#dbeafe,stroke:#2563eb,color:#000
     classDef vpn fill:#fce7f3,stroke:#db2777,color:#000
+    classDef automation fill:#ede9fe,stroke:#7c3aed,color:#000
     classDef infra fill:#f3f4f6,stroke:#6b7280,color:#000

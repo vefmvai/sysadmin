@@ -18,10 +18,11 @@
 #   bash dump-snapshot.sh root@10.0.0.1 2026-01-01       # произвольный сервер и дата
 #   bash dump-snapshot.sh prod today /tmp/inv            # альтернативный INVENTORY_DIR
 #
-# Создаёт ~14 файлов в ${INVENTORY_DIR}/hosts/<HOST_DIR>/snapshots/<DATE>/
+# Создаёт ~16 файлов в ${INVENTORY_DIR}/hosts/<HOST_DIR>/snapshots/<DATE>/
 # (containers, networks, volumes, host-resources, crontab, nginx-sites, tls-certs,
 #  host-scripts-list, host-scripts-content, host-env-redacted, cron-d-content,
-#  systemd-enabled, compose-files, containers-inspect.json, meta.txt).
+#  systemd-enabled, systemd-timers, watchers, compose-files,
+#  containers-inspect.json, meta.txt).
 
 set -euo pipefail
 
@@ -143,7 +144,7 @@ taken_by: $(whoami)
 script_version: bundled-v2
 METATXT
 
-# === 14 контентных файлов снимка ===
+# === 16 контентных файлов снимка ===
 
 # 1. Список контейнеров
 run_remote "containers.txt" \
@@ -226,6 +227,45 @@ done'
 # 14. Включённые systemd-юниты (без штатных system-юнитов)
 run_remote "systemd-enabled.txt" \
     "systemctl list-unit-files --type=service --state=enabled 2>/dev/null | grep -vE '^(UNIT|[0-9]+ unit|systemd-|sys-|snap\\.)' | head -50"
+
+# 15. systemd-таймеры (расписание наравне с cron на Ubuntu 24.04) — таблица
+#     активных таймеров + содержимое *.timer-юнитов оператора (без штатной
+#     системной обвязки). set +e: на хостах без systemd / с урезанным systemctl
+#     вызов не должен ронять снимок (граблекейс tls-certs).
+run_remote "systemd-timers.txt" \
+    "set +e
+     echo '=== list-timers (активные) ==='
+     systemctl list-timers --all --no-pager 2>/dev/null || echo 'нет данных (systemctl недоступен)'
+     echo
+     echo '=== *.timer-юниты оператора (без штатных system-) ==='
+     timers=\$(systemctl list-unit-files --type=timer --no-pager 2>/dev/null \\
+       | awk '{print \$1}' \\
+       | grep -E '\\.timer\$' \\
+       | grep -vE '^(systemd-|sys-|snap\\.|apt-|man-db|logrotate|fstrim|e2scrub|fwupd|motd|dpkg|plocate|update-notifier|anacron)' )
+     if [ -z \"\$timers\" ]; then
+       echo 'пусто (нет таймеров оператора)'
+     else
+       for t in \$timers; do
+         echo \"--- \$t ---\"
+         systemctl cat \"\$t\" 2>/dev/null || echo '(не удалось прочитать юнит)'
+         echo
+       done
+     fi
+     true"
+
+# 16. Скрипты-наблюдатели (watchers) — долгоживущие процессы, слушающие события
+#     (inotify/fswatch/watchdog), в отличие от запуска по расписанию.
+#     set +e: ps/grep на пустом наборе возвращают ненулевой код — это не ошибка.
+run_remote "watchers.txt" \
+    "set +e
+     echo '=== процессы-наблюдатели (event-driven) ==='
+     out=\$(ps -eo comm,args 2>/dev/null | grep -E 'inotifywait|inotifywatch|fswatch|watchmedo|watchdog' | grep -v grep)
+     if [ -z \"\$out\" ]; then
+       echo 'пусто (наблюдателей не найдено)'
+     else
+       echo \"\$out\"
+     fi
+     true"
 
 # === Итог ===
 FILE_COUNT=$(find "$SNAPSHOT_DIR" -maxdepth 1 -type f | wc -l | tr -d ' ')

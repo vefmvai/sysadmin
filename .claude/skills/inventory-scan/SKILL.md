@@ -1,10 +1,10 @@
 ---
 name: inventory-scan
 description: |
-  Read-only инвентаризация сервера: dump-snapshot.sh → 8 текстовых документов в inventory/
-  (services, networks, volumes, databases, domains, cron, host-scripts, server)
-  + 4 mermaid-диаграммы в inventory/diagrams/ (topology, services-network, domains-routing,
-  vpn-architecture). Сравнение с прошлым inventory с выделением drift'ов. Green Zone.
+  Read-only инвентаризация сервера: dump-snapshot.sh → 9 текстовых документов в inventory/
+  (services, networks, volumes, databases, domains, cron, host-scripts, automations, server)
+  + до 5 mermaid-диаграмм в inventory/diagrams/ (topology, services-network, domains-routing,
+  vpn-architecture, automations). Сравнение с прошлым inventory с выделением drift'ов. Green Zone.
   Триггеры: «инвентаризация», «снять снимок сервера», «что у меня на сервере», «обновить inventory»,
   «обнови схемы инфры», «отрисуй диаграмму», «scan server», «inventory drift», «refresh inventory».
   НЕ для изменений на сервере (это cleanup-existing-server и др.); НЕ для аудита безопасности
@@ -36,8 +36,9 @@ inventory и выделяю drift'ы между документацией и р
 - Snapshot создан в `inventory/hosts/<host>/snapshots/YYYY-MM-DD/`
 - Snapshot содержит все ожидаемые файлы (containers, networks, volumes, host-resources,
   crontab, nginx-sites, tls-certs, host-scripts-content, host-env-redacted, cron-d-content,
-  systemd-enabled, compose-files, containers-inspect.json)
-- 8 inventory-документов в `inventory/hosts/<host>/` обновлены или созданы из шаблона
+  systemd-enabled, systemd-timers, watchers, compose-files, containers-inspect.json)
+- 9 inventory-документов в `inventory/hosts/<host>/` обновлены или созданы из шаблона
+  (`automations.md` — только при наличии хоть одной автоматизации)
 - Drift между inventory и реальностью явно обозначен в `drift-report.md` свежего snapshot
 - Honest unknown применён везде, где данные отсутствуют (`? уточнить` или `нет данных` —
   никаких выдуманных значений)
@@ -92,13 +93,17 @@ bash scripts/dump-snapshot.sh "$SSH_HOST" "$SNAPSHOT_DATE"
 - Структура .env-файлов на хосте (имена переменных, значения redacted)
   (`host-env-redacted.txt`)
 - Включённые systemd-юниты (`systemd-enabled.txt`)
+- systemd-таймеры оператора — расписание наравне с cron на Ubuntu 24.04 (`systemd-timers.txt`)
+- Скрипты-наблюдатели — долгоживущие процессы inotify/fswatch/watchdog,
+  слушающие события, а не запускаемые по расписанию (`watchers.txt`)
 - Метаданные снимка (`meta.txt`)
 
-Verify: snapshot-директория не пуста, размер ≥1 МБ, есть хотя бы 14 файлов.
+Verify: snapshot-директория не пуста, размер ≥1 МБ, есть хотя бы 16 файлов
+(было 14 + два новых: `systemd-timers.txt`, `watchers.txt`).
 
 ```bash
 SNAPSHOT_DIR="$INVENTORY_DIR/hosts/<HOST_DIR>/snapshots/$SNAPSHOT_DATE"
-[ -d "$SNAPSHOT_DIR" ] && [ "$(ls -1 "$SNAPSHOT_DIR" | wc -l)" -ge 14 ] || \
+[ -d "$SNAPSHOT_DIR" ] && [ "$(ls -1 "$SNAPSHOT_DIR" | wc -l)" -ge 16 ] || \
   { echo "ОШИБКА: snapshot неполный"; exit 1; }
 ```
 
@@ -106,7 +111,8 @@ SNAPSHOT_DIR="$INVENTORY_DIR/hosts/<HOST_DIR>/snapshots/$SNAPSHOT_DATE"
 
 ## Шаг 3. Сравнение с существующим inventory
 
-Для каждого из 8 документов сверяю snapshot с тем, что записано:
+Для каждого из 9 документов (`automations.md` — при наличии автоматизаций) сверяю
+snapshot с тем, что записано:
 
 ```bash
 # Контейнеры
@@ -122,10 +128,10 @@ Drift-категории:
 Результат — `$SNAPSHOT_DIR/drift-report.md`. Если drift'ов нет — пишу
 «drift'ов не найдено, inventory синхронен».
 
-## Шаг 4. Обновление 8 inventory-документов
+## Шаг 4. Обновление 9 inventory-документов
 
 Для каждого документа (services / networks / volumes / databases / domains / cron /
-host-scripts / server):
+host-scripts / automations / server):
 
 - Если документ существует — `Edit` правлю изменённые строки, добавляю пометку
   `<!-- snapshot YYYY-MM-DD: было X, стало Y -->` рядом со старым значением
@@ -135,11 +141,26 @@ host-scripts / server):
 Никогда не переписываю файл с нуля — теряется история ручных правок и комментариев
 оператора.
 
+**`automations.md` — сводная витрина (генерируется только при наличии автоматизаций).**
+Это «оглавление всего, что работает само». Колонки: `name | trigger | schedule | runs |
+touches | log | status`. Агрегирую данные из четырёх источников:
+
+- `crontab.txt` / `cron-d-content.txt` → trigger `cron`
+- `systemd-timers.txt` → trigger `systemd-timer` (расписание из `list-timers`, что
+  запускается — из парного `*.service` юнита)
+- `watchers.txt` → trigger `watcher` (событие, не расписание)
+- `host-scripts-content.txt` → чем pipeline/скрипт занят (для колонки `touches`)
+
+Колонка `touches` — главная: что автоматизация трогает (БД из `databases.md`, сервис
+из `services.md`, внешний API — Telegram/RSS/Claude). Это **источник связей** для
+диаграммы `automations.mmd`. Не дублирую `cron.md`/`host-scripts.md` слово в слово —
+агрегирую и осмысляю. Если автоматизаций нет (типично до Модуля 6) — документ не создаю.
+
 ## Шаг 4.5. Mermaid-диаграммы инфраструктуры
 
 После обновления текстовых документов inventory — обновить визуальные mermaid-диаграммы в `$INFRA/inventory/diagrams/`.
 
-**Шаблоны** (4 файла) лежат в публичном репо: `<sysadmin-root>/.claude/skills/inventory-scan/templates/diagrams/`.
+**Шаблоны** (5 файлов) лежат в публичном репо: `<sysadmin-root>/.claude/skills/inventory-scan/templates/diagrams/`.
 
 **Алгоритм:**
 
@@ -158,10 +179,11 @@ fi
 
 **Что обновляется в каждой диаграмме** (использую `Edit`, не переписываю целиком):
 
-1. **`topology.mmd`** — высокоуровневая карта. Источник: `services.md` (группы), `domains.md` (внешние домены), `server.md` (имя хоста, провайдер, IP).
+1. **`topology.mmd`** — высокоуровневая карта. Источник: `services.md` (группы), `domains.md` (внешние домены), `server.md` (имя хоста, провайдер, IP). Группа `automations` появляется **только при непустом `automations.md`** — показываю факт наличия + 1-2 ключевые связи (например, pipeline → Postgres, pipeline → Telegram), без детализации триггеров (детали — в `automations.mmd`).
 2. **`services-network.mmd`** — Docker-сети + контейнеры + порты. Источник: `networks.md` + `services.md` (колонки «Порт» и «Сеть»).
 3. **`domains-routing.mmd`** — домен → nginx → upstream. Источник: `domains.md` + nginx-конфиги из snapshot (`nginx-sites.txt`).
 4. **`vpn-architecture.mmd`** — **только если** `vpn.enabled: true` в `sysadmin-config.json`. Иначе удалить файл из `diagrams/` (если был от прошлого запуска). Источник: `sysadmin-config.json` секция vpn + `services.md` (3x-ui контейнер) + `networks.md` (mixed inbound если есть).
+5. **`automations.mmd`** — **только если** на сервере есть хоть одна автоматизация (непустой `automations.md`). Иначе удалить файл из `diagrams/` (если был от прошлого запуска) — по образцу `vpn-architecture.mmd`. Показывает три колонки: триггеры (cron/timer/watcher/manual) → автоматизации → что трогают (БД/сервисы/внешние API). Пунктир `-.запускает.->` от триггера к автоматизации, сплошная `-->` к тому, что трогает. Источник: `automations.md` (колонка `touches` даёт связи) + `cron.md` + `host-scripts.md` + `systemd-timers.txt` + `watchers.txt`.
 
 **Правила:**
 
@@ -200,7 +222,7 @@ find "$INVENTORY_DIR/hosts/<host>/snapshots/" -mindepth 1 -maxdepth 1 -type d \
 - Размер snapshot (МБ)
 - Список drift'ов (если найдены) — с категориями + / - / ~
 - Список изменённых inventory-документов
-- **Список обновлённых mermaid-диаграмм** (`diagrams/topology.mmd`, и т.д.). Если первая инвентаризация и диаграммы созданы с нуля — отметить «созданы из шаблонов».
+- **Список обновлённых mermaid-диаграмм** (`diagrams/topology.mmd`, и т.д.). Если первая инвентаризация и диаграммы созданы с нуля — отметить «созданы из шаблонов». Если есть автоматизации — отдельной строкой отметить `diagrams/automations.mmd` и группу `automations` в `topology.mmd`; если автоматизаций нет — отметить, что диаграмма автоматизаций не создана (нет данных).
 - Рекомендации, если нужно: что ещё проверить вручную
 
 # Failed Attempts (граблекейс)

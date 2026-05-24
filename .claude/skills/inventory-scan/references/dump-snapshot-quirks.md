@@ -144,3 +144,33 @@ gitleaks. Файл `containers-inspect.json` всегда даёт ~40 false pos
 **Лечение:** скрипт фильтрует через
 `grep -vE '^(UNIT|[0-9]+ unit|systemd-|sys-|snap\.)'` и берёт первые 50
 строк. Если оператор хочет увидеть всё — запустить вручную без фильтра.
+
+---
+
+## systemd-timers.txt: штатные таймеры маскируют таймеры оператора
+
+**Симптом:** `systemctl list-timers` показывает десятки штатных таймеров
+(`apt-daily`, `man-db`, `logrotate`, `fstrim`, `e2scrub`, `fwupd`-refresh),
+среди которых теряется заведённый оператором `backup.timer` или `pipeline.timer`.
+
+**Лечение:** секция `systemd-timers.txt` фильтрует список `*.timer`-юнитов тем же
+подходом, что и `systemd-enabled.txt` — исключает `systemd-/sys-/snap./apt-/man-db/
+logrotate/fstrim/e2scrub/fwupd/...`, оставляя юниты оператора. `list-timers` (с
+расписанием next/last) выводится целиком — расписание читается оттуда, а `systemctl
+cat` показывает только отфильтрованные юниты. На хосте без systemd (контейнер,
+macOS-local) — honest unknown «нет данных (systemctl недоступен)», снимок не падает
+(`set +e`).
+
+---
+
+## watchers.txt: наблюдатель ≠ скрипт по расписанию
+
+**Симптом:** скрипт с `inotifywait`/`fswatch`/`watchdog` виден в `systemd-enabled.txt`
+как обычный сервис и неотличим от него — на карте получает роль «сервис», а не
+«автоматизация-наблюдатель».
+
+**Лечение:** секция `watchers.txt` ловит долгоживущие процессы
+`ps -eo comm,args | grep -E 'inotifywait|inotifywatch|fswatch|watchmedo|watchdog'`.
+Это событийный триггер (`trigger: watcher` в `automations.md`), а не расписание.
+Пустой набор → «пусто (наблюдателей не найдено)», не ошибка (`set +e` — grep на
+пустом выводе возвращает ненулевой код).
