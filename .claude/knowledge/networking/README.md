@@ -47,6 +47,7 @@
 | `routing-on-device-singbox.md` | Маршрутизация на устройстве через sing-box (энтузиасты): раскол ядра 1.11↔1.12, клиенты |
 | `routing-on-device-xray.md` | Маршрутизация на устройстве через Xray в терминале (энтузиасты-десктоп) |
 | `xray-mac-chain.md` | Xray chain (VLESS→VLESS) на Mac для Claude Code: proxy-only bypass WL |
+| `subscription-mirroring.md` | Зеркалирование платной подписки на свой сервер (обход лимита устройств): извлечение → раздача через nginx /c/ → автосинк cron с канон-сравнением |
 
 ### `_meta/` — мета-слой (TTL 365 дней)
 
