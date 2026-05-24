@@ -22,6 +22,13 @@
 [ -n "${_SYSADMIN_SELFTEST_LOADED:-}" ] && return 0
 _SYSADMIN_SELFTEST_LOADED=1
 
+# Подключаем единый резолвер пути к инфре (resolve_infra_path).
+# Канон fix v1.4.2: относительный root_path резолвится от каталога конфига,
+# а не от cwd процесса — иначе self-test ложно проваливается на «../infra».
+_stp_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck source=find-config.sh
+[ -f "$_stp_script_dir/find-config.sh" ] && . "$_stp_script_dir/find-config.sh"
+
 # Печатает честный вердикт-провал понятным новичку языком.
 # $1 — список конкретных проблем (многострочный).
 _setup_failure_verdict() {
@@ -74,13 +81,30 @@ self_test_setup() {
                 _stp_add "Конфиг не проходит проверку по схеме (какое-то поле заполнено неверно)."
             fi
         fi
-        # 5. папка infra/ существует
+        # 5. папка infra/ существует.
+        # Резолвим root_path ОТНОСИТЕЛЬНО КАТАЛОГА КОНФИГА (канон v1.4.2), а не от
+        # cwd процесса — иначе относительный путь типа «../infra» ложно проваливает
+        # проверку при запуске из произвольной папки (баг до v1.4.2).
         if command -v jq >/dev/null 2>&1; then
             local raw infra
             raw="$(jq -r '.infrastructure.root_path // empty' "$config_path" 2>/dev/null)"
-            infra="${raw/#\~/$HOME}"
-            if [ -n "$infra" ] && [ ! -d "$infra" ]; then
-                _stp_add "Папка инфраструктуры не создана: $raw (агенту некуда писать inventory)."
+            if [ -n "$raw" ]; then
+                if command -v resolve_infra_path >/dev/null 2>&1; then
+                    # resolve_infra_path печатает абсолютный путь; rc=1 если папки нет.
+                    if ! infra="$(resolve_infra_path "$raw" "$config_path")"; then
+                        _stp_add "Папка инфраструктуры не создана: $raw → $infra (агенту некуда писать inventory)."
+                    fi
+                else
+                    # Fallback, если резолвер не подгрузился: хотя бы tilde + от каталога конфига.
+                    infra="${raw/#\~/$HOME}"
+                    case "$infra" in
+                        /*|[A-Za-z]:[\\/]*) : ;;  # абсолютный — как есть
+                        *) infra="$(cd "$(dirname "$config_path")" 2>/dev/null && cd "$infra" 2>/dev/null && pwd)" ;;
+                    esac
+                    if [ -z "$infra" ] || [ ! -d "$infra" ]; then
+                        _stp_add "Папка инфраструктуры не создана: $raw (агенту некуда писать inventory)."
+                    fi
+                fi
             fi
         fi
     fi

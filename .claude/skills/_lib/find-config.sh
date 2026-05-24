@@ -43,6 +43,61 @@
 [ -n "${_SYSADMIN_FIND_CONFIG_LOADED:-}" ] && return 0
 _SYSADMIN_FIND_CONFIG_LOADED=1
 
+# ──────────────────────────────────────────────────────────────────────────
+# resolve_infra_path — ЕДИНЫЙ резолвер пути к папке инфры из root_path.
+#
+# Канон (ADR-0008, fix v1.4.2): относительный root_path резолвится ОТНОСИТЕЛЬНО
+# КАТАЛОГА КОНФИГА, а не от cwd процесса. Причина: /sysadmin-init кладёт сам
+# конфиг ВНУТРЬ папки инфры (CONFIG_PATH="$INFRA/sysadmin-config.json"), поэтому
+# «../infra от конфига» однозначно и не зависит от того, из какой папки запущен
+# агент/скилл/самопроверка. Раньше три места резолвили по-разному (cwd процесса,
+# cwd скилла, только tilde) → ложный провал self-test на относительном пути.
+#
+# Правила:
+#   • tilde (~) в начале → $HOME (через bash-замену, без eval — безопасно).
+#   • абсолютный путь → как есть.
+#   • относительный путь → от каталога $2 (каталог конфига).
+#
+# Использование:
+#   resolve_infra_path "$RAW_ROOT_PATH" "$CONFIG_PATH"
+#   # печатает абсолютный путь в stdout; rc=0 если папка существует, 1 если нет.
+#   # ВАЖНО: rc=1 не значит ошибка — папки инфры может ещё не быть (First-Run).
+resolve_infra_path() {
+    local raw="$1"
+    local config_path="$2"
+    [ -z "$raw" ] && return 1
+
+    # 1. tilde → $HOME (только ведущий ~, как в Cold Start)
+    local expanded="${raw/#\~/$HOME}"
+
+    # 2. абсолютный путь — отдаём как есть (Unix / и Windows-native C:\ или C:/)
+    case "$expanded" in
+        /*|[A-Za-z]:[\\/]*)
+            printf '%s\n' "$expanded"
+            [ -d "$expanded" ] && return 0 || return 1
+            ;;
+    esac
+
+    # 3. относительный путь — резолвим от КАТАЛОГА КОНФИГА
+    local base resolved
+    if [ -n "$config_path" ]; then
+        base="$(cd "$(dirname "$config_path")" 2>/dev/null && pwd)"
+    fi
+    # Если каталог конфига недоступен — честный fallback на cwd (лучше, чем молча соврать).
+    [ -z "$base" ] && base="$(pwd)"
+
+    # cd в существующую папку даёт нормализованный абсолютный путь (схлопывает ../).
+    # Если папки ещё нет (First-Run) — собираем путь текстом, чтобы вызывающий
+    # мог показать осмысленное сообщение и/или mkdir -p.
+    resolved="$(cd "$base" 2>/dev/null && cd "$expanded" 2>/dev/null && pwd)"
+    if [ -n "$resolved" ]; then
+        printf '%s\n' "$resolved"
+        return 0
+    fi
+    printf '%s\n' "$base/$expanded"
+    return 1
+}
+
 # Определить SYSADMIN_ROOT (корень sysadmin/ репо) — нужно, например, для доступа
 # к sysadmin-config.schema.json и другим артефактам мозга агента.
 # Алгоритм: bridge-файл ~/.claude/agents/sysadmin.md содержит абсолютный путь

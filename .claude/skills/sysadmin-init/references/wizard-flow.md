@@ -62,7 +62,13 @@ ANSWER="$1"   # то, что ввёл оператор
 # 1. Раскрыть tilde и сделать путь абсолютным для проверки
 EXPANDED_PATH=$(echo "$ANSWER" | sed "s|^~|$HOME|")
 if [[ "$EXPANDED_PATH" != /* ]]; then
-    # относительный путь — резолвлю относительно cwd скилла (это будет sysadmin/)
+    # Относительный путь — резолвлю относительно cwd скилла (это будет sysadmin/).
+    # ВАЖНО (ADR-0008): это согласовано с каноном «резолв от каталога конфига», хотя
+    # выглядит как другое правило. Причина: /sysadmin-init создаёт папку инфры и кладёт
+    # конфиг ВНУТРЬ неё (Шаг 9: CONFIG_PATH="$INFRA_PATH/sysadmin-config.json"). Поэтому
+    # `../infra` от sysadmin/ и `../infra` от будущего каталога конфига указывают на одну
+    # папку (../infra/../infra == ../infra). НЕ «упрощай» этот резолв до $PWD без cd —
+    # сломаешь согласованность с self-test и cold-start.
     ABS_PATH="$(cd "$(pwd)" && cd "$EXPANDED_PATH" 2>/dev/null && pwd || echo "$PWD/$EXPANDED_PATH")"
 else
     ABS_PATH="$EXPANDED_PATH"

@@ -143,14 +143,16 @@ sysadmin/                          ← публичный репо (этот). �
 │       ├── cleanup-existing-server/
 │       └── migrate-server-to-server/
 │
-├── decisions/                     ← ADR-канон + 6 архитектурных решений
+├── decisions/                     ← ADR-канон + 8 архитектурных решений
 │   ├── 0000-template.md
 │   ├── 0001-skill-canon.md
 │   ├── 0002-persona-canon.md
 │   ├── 0003-knowledge-architecture.md
 │   ├── 0004-evals-format.md
 │   ├── 0005-vpn-architecture.md
-│   └── 0006-vpn-knowledge-layers.md
+│   ├── 0006-vpn-knowledge-layers.md
+│   ├── 0007-happ-default-client.md
+│   └── 0008-infra-path-resolution.md
 │
 ├── sysadmin-config.example.json   ← публичный шаблон конфига (твой реальный — в infra/)
 ├── sysadmin-config.schema.json    ← JSON Schema для валидации
