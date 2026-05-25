@@ -4,6 +4,32 @@
 версии — по [SemVer](https://semver.org/lang/ru/). Версия мозга — в файле `VERSION`,
 релизы помечены git-тегами `vX.Y.Z`.
 
+## [1.4.3] — 2026-05-25
+
+Фикс засорения снимка `/inventory-scan` stderr'ом ssh-клиента. Прогон у пользователя на
+Windows/OpenSSH 9.x (отчёт 2026-05-25): в файлы снимка попадал транспортный шум ssh
+(`mux_client_request_session`, post-quantum warning, `ControlSocket already exists`),
+ломая идемпотентность — ручная чистка не помогала, следующий скан тащил мусор заново.
+
+### Исправлено
+- **stderr ssh-клиента в файлах снимка** (`dump-snapshot.sh`). Старое
+  `run_cmd "$cmd" 2>&1 | redact_stream` сливало stderr удалённой команды и stderr
+  локального ssh в один поток. Лечение двумя рычагами:
+  - `run_cmd` вызывает `ssh -o LogLevel=ERROR -o ControlMaster=no` — глушит
+    WARNING/INFO ssh-клиента у источника, пропуская реальные ERROR/FATAL.
+  - `run_remote` разделяет потоки: stdout (данные) → файл снимка, stderr (диагностика
+    удалённой команды) → `<label>.stderr.log` рядом, только если непустой. Оба потока
+    проходят redaction — секрет в stderr тоже маскируется (приоритет №1).
+
+### Добавлено
+- **ADR-0009** (`decisions/0009-snapshot-stderr-separation.md`) — фиксирует разделение
+  потоков и заглушение ssh-шума.
+- Квирк в `dump-snapshot-quirks.md` — симптом, причина, лечение; класс файлов
+  `*.stderr.log` как нормальный продукт скана.
+
+### Изменено
+- README: список ADR дополнен (0009), число решений 8 → 9.
+
 ## [1.4.2] — 2026-05-25
 
 Фикс резолва относительного `infrastructure.root_path`. Прогон у пользователя на

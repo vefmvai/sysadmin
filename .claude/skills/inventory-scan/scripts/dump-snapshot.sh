@@ -119,7 +119,16 @@ else
     fi
 
     echo "  [OK] Предусловия пройдены. Режим: SSH"
-    run_cmd() { ssh -o ConnectTimeout=10 "$SERVER" "$1"; }
+    # Опции против засорения снимка stderr'ом самого ssh-клиента (баг до v1.4.3):
+    #   LogLevel=ERROR   — глушит WARNING/INFO ssh-клиента (post-quantum warning,
+    #                      «ControlSocket ... already exists», болтовню мультиплексора),
+    #                      но пропускает ERROR/FATAL — реальные сбои соединения видны.
+    #   ControlMaster=no — для этих коротких одноразовых команд не используем
+    #                      мультиплексирование оператора (ControlMaster auto в его
+    #                      ~/.ssh/config даёт «mux_client_request_session»,
+    #                      «Connection reset by peer» в stderr на OpenSSH 9.x / Windows).
+    # stderr самой удалённой команды это НЕ трогает — он отделяется в run_remote.
+    run_cmd() { ssh -o ConnectTimeout=10 -o LogLevel=ERROR -o ControlMaster=no "$SERVER" "$1"; }
 fi
 
 # === Создаём папку снимка ===
@@ -207,11 +216,28 @@ run_remote() {
     local label="$1"
     local cmd="$2"
     local outfile="${SNAPSHOT_DIR}/${label}"
+    local errfile="${SNAPSHOT_DIR}/${label}.stderr.log"
     echo "  -> ${label}..."
-    if ! run_cmd "$cmd" 2>&1 | redact_stream > "$outfile"; then
+
+    # Разделяем потоки (fix v1.4.3): stdout (данные команды) → файл снимка,
+    # stderr (диагностика удалённой команды) → отдельный *.stderr.log рядом.
+    # Раньше было `run_cmd ... 2>&1 | redact_stream`, и stderr самого ssh-клиента
+    # (mux_client_request_session, post-quantum warning, ControlSocket...) попадал
+    # ПРЯМО в файл снимка — ломая идемпотентность (следующий скан собирал его же).
+    # Теперь ssh-шум заглушён в run_cmd (LogLevel/ControlMaster), а stderr — отделён.
+    # ОБА потока проходят redact_stream: stderr тоже может содержать секреты
+    # (например, ошибка с connection-string) — секреты маскируются везде (приоритет №1).
+    local err_raw
+    err_raw="$(mktemp)"
+    if ! run_cmd "$cmd" 2>"$err_raw" | redact_stream > "$outfile"; then
         echo "     ПРЕДУПРЕЖДЕНИЕ: не удалось выполнить ${label}"
         echo "ERROR: ${cmd}" >> "$outfile"
     fi
+    # stderr пишем рядом, но только если он непустой — не плодим мусорные файлы.
+    if [ -s "$err_raw" ]; then
+        redact_stream < "$err_raw" > "$errfile"
+    fi
+    rm -f "$err_raw"
 }
 
 # === Заголовочный файл meta.txt ===

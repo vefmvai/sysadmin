@@ -41,6 +41,43 @@
 
 ---
 
+## stderr самого ssh-клиента попадал в файлы снимка (fix v1.4.3)
+
+**Симптом:** в файлах снимка (`containers.txt`, `networks.txt` и др.) среди
+данных встречаются строки вида `mux_client_request_session: ... Connection
+reset by peer`, `** WARNING: connection is not using a post-quantum key
+exchange algorithm`, `ControlSocket ... already exists, disabling
+multiplexing`. Особенно заметно на Windows / OpenSSH 9.x с `ControlMaster auto`
+в `~/.ssh/config` оператора. Ручная чистка `sed`-ом не идемпотентна — следующий
+`/inventory-scan` соберёт мусор заново.
+
+**Причина:** старая строка `run_cmd "$cmd" 2>&1 | redact_stream > "$outfile"`
+сливала в один поток stderr **двух** источников: (1) удалённой команды —
+полезно, и (2) локального `ssh`-клиента — шум транспорта. После `2>&1`
+отличить их уже нельзя.
+
+**Лечение (v1.4.3), два рычага:**
+
+1. **Заглушить ssh-клиентский шум у источника** — в `run_cmd`:
+   `ssh -o LogLevel=ERROR -o ControlMaster=no ...`. `LogLevel=ERROR` убирает
+   WARNING/INFO (post-quantum warning, ControlSocket-болтовню), но пропускает
+   ERROR/FATAL — реальные сбои соединения видны. `ControlMaster=no` отключает
+   мультиплексирование оператора для этих коротких команд (источник
+   `mux_client_request_session`).
+2. **Разделить потоки в `run_remote`** — stdout (данные) → файл снимка,
+   stderr (диагностика удалённой команды) → отдельный `<label>.stderr.log`
+   рядом, **только если он непустой** (не плодим пустые файлы; команды с
+   `2>/dev/null` внутри их не создают). ОБА потока проходят `redact_stream` —
+   stderr тоже может содержать секрет (ошибка с connection-string), маскировка
+   везде (приоритет №1 CLAUDE.md). Зафиксировано в ADR-0009.
+
+**Класс файлов `*.stderr.log`** — нормальный продукт скана, не сбой. Появляется
+рядом с секцией, если удалённая команда что-то написала в stderr. Verify
+«≥16 файлов» он не ломает (только добавляет). Снимки живут в приватной `infra/`
+— версионирование `.stderr.log` решает оператор в своём `.gitignore`.
+
+---
+
 ## find -mtime +N округляет вниз
 
 **Симптом:** `find -mtime +1` пропускает файлы, которые «вчера», но
