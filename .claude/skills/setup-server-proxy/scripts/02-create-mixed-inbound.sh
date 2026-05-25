@@ -64,8 +64,9 @@ STREAM_SETTINGS_JSON='{"network":"tcp","security":"none"}'
 SNIFFING_JSON='{"enabled":true,"destOverride":["http","tls","quic"]}'
 
 INBOUND_TAG="mixed-server-proxy"
+# remark виден оператору в панели — делаем его понятным новичку (что это и зачем).
 INBOUND_JSON="$(jq -nc \
-    --arg remark "server-proxy ($PROXY_LISTEN:$PROXY_PORT)" \
+    --arg remark "🔌 локальный прокси для программ на сервере ($PROXY_LISTEN:$PROXY_PORT, SOCKS5+HTTP)" \
     --arg listen "$PROXY_LISTEN" \
     --argjson port "$PROXY_PORT" \
     --arg tag "$INBOUND_TAG" \
