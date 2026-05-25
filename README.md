@@ -143,7 +143,7 @@ sysadmin/                          ← публичный репо (этот). �
 │       ├── cleanup-existing-server/
 │       └── migrate-server-to-server/
 │
-├── decisions/                     ← ADR-канон + 9 архитектурных решений
+├── decisions/                     ← ADR-канон + 10 архитектурных решений
 │   ├── 0000-template.md
 │   ├── 0001-skill-canon.md
 │   ├── 0002-persona-canon.md
@@ -153,7 +153,8 @@ sysadmin/                          ← публичный репо (этот). �
 │   ├── 0006-vpn-knowledge-layers.md
 │   ├── 0007-happ-default-client.md
 │   ├── 0008-infra-path-resolution.md
-│   └── 0009-snapshot-stderr-separation.md
+│   ├── 0009-snapshot-stderr-separation.md
+│   └── 0010-hwid-locked-subscriptions.md
 │
 ├── sysadmin-config.example.json   ← публичный шаблон конфига (твой реальный — в infra/)
 ├── sysadmin-config.schema.json    ← JSON Schema для валидации
