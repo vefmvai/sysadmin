@@ -28,9 +28,9 @@
   `UPSTREAM_VPN_URL=vless://...`
 
 **Что делает скилл:**
-1. Скачивает подписку через `parse-subscription.sh` (или принимает прямой
-   vless://-link через `parse-vless-link.sh`).
-2. Если ссылок несколько — добавляет каждую как отдельный outbound с tag
+1. Берёт уже извлечённые сервера подписки (их достаёт `/extract-subscription-servers`
+   и сохраняет в infra) ИЛИ принимает прямой vless://-link через `parse-vless-link.sh`.
+2. Если серверов несколько — добавляет каждый как отдельный outbound с tag
    вида `upstream-<slug-of-tag>`.
 3. Через `setup-routing.sh` создаёт balancer (если outbound > 1) с
    `leastPing` стратегией + observatory.
@@ -182,7 +182,7 @@ fp, spx) приходят из vless://-ссылки.
 - `vpn-protocols.md` §4 — концепция multi-hop, протоколы.
 - `3x-ui-panel.md` — балансировщики и observatory в панели.
 - `3x-ui-api.md` §6 — REST API outbounds + routing.
-- `subscription-formats.md` (в этом же скилле) — форматы подписок провайдеров.
+- `/extract-subscription-servers` — извлечение серверов из подписки (форматы, HWID-замок).
 
 ---
 
