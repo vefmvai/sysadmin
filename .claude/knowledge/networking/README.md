@@ -48,6 +48,7 @@
 | `routing-on-device-xray.md` | Маршрутизация на устройстве через Xray в терминале (энтузиасты-десктоп) |
 | `xray-mac-chain.md` | Xray chain (VLESS→VLESS) на Mac для Claude Code: proxy-only bypass WL |
 | `subscription-mirroring.md` | Зеркалирование платной подписки на свой сервер (обход лимита устройств): извлечение → раздача через nginx /c/ → автосинк cron с канон-сравнением |
+| `web-and-vpn-coexistence.md` | **Сайты + VPN на одном сервере (кто слушает 443)** — почему Reality и nginx не делят порт, 4 раскладки (A/B/C/D), decision tree, как развязать конфликт без обрыва живых клиентов |
 
 ### `_meta/` — мета-слой (TTL 365 дней)
 
