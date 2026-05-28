@@ -2,21 +2,26 @@
 # 03-configure-tls.sh — выпуск Let's Encrypt сертификата и привязка к панели.
 #
 # Поддерживаемые методы (выбор через TLS_METHOD):
-#   acme-standalone  — встроенный acme в 3X-UI через standalone HTTP-01 (порт 80).
-#                      Рекомендуется когда панель ставится на чистый сервер
-#                      без других сервисов на 80.
-#   acme-cloudflare  — встроенный acme в 3X-UI через Cloudflare DNS-01.
-#                      Требует CLOUDFLARE_EMAIL и CLOUDFLARE_API_KEY.
-#                      Не освобождает порт 80, безопаснее для серверов с
-#                      существующими сервисами.
-#   certbot          — внешний certbot --standalone, потом
-#                      ручная привязка к панели через `x-ui setting -getCert`.
+#   acme-webroot       — ДЕФОЛТ. acme.sh через работающий nginx (HTTP-01 webroot).
+#                        Не моргает nginx ни при выпуске, ни при renew.
+#                        Требует уже работающий nginx с server-блоком на 80.
+#   certbot-webroot    — то же на certbot вместо acme.sh.
+#   acme-standalone    — FALLBACK для VPS-без-nginx. acme.sh --standalone (HTTP-01).
+#                        Останавливает nginx/apache на 80 на ~30-60 сек.
+#                        Брать только если nginx нет и не планируется.
+#   certbot-standalone — то же на certbot. Алиас `certbot` для совместимости.
+#   acme-cloudflare    — DNS-01 через Cloudflare API. ВАЖНО: для РФ-операторов
+#                        НЕ рекомендуется (Cloudflare блокируется в РФ).
+#                        Требует CLOUDFLARE_EMAIL и CLOUDFLARE_API_KEY (Global Key).
+#
+# Полное обоснование выбора: references/tls-method-choice.md.
 #
 # Вход через ENV:
 #   SSH_TARGET            — SSH-цель
 #   DOMAIN                — домен (A-запись резолвится в IP сервера)
 #   ADMIN_EMAIL           — email для Let's Encrypt уведомлений (рекомендуется)
-#   TLS_METHOD            — acme-standalone | acme-cloudflare | certbot
+#   TLS_METHOD            — см. выше
+#   WEBROOT_PATH          — только для *-webroot. По умолчанию /var/www/letsencrypt
 #   CLOUDFLARE_EMAIL      — только для acme-cloudflare
 #   CLOUDFLARE_API_KEY    — только для acme-cloudflare (Global API Key, не Token)
 #
@@ -29,14 +34,161 @@ set -euo pipefail
 
 SSH_TARGET="${SSH_TARGET:?SSH_TARGET обязателен}"
 DOMAIN="${DOMAIN:?DOMAIN обязателен}"
-TLS_METHOD="${TLS_METHOD:-acme-standalone}"
+TLS_METHOD="${TLS_METHOD:-acme-webroot}"
 ADMIN_EMAIL="${ADMIN_EMAIL:-admin@${DOMAIN}}"
+WEBROOT_PATH="${WEBROOT_PATH:-/var/www/letsencrypt}"
 
 CERT_DIR="/root/cert/${DOMAIN}"
 CERT_FILE="${CERT_DIR}/fullchain.pem"
 KEY_FILE="${CERT_DIR}/privkey.pem"
 
+# Алиас обратной совместимости: certbot → certbot-standalone
+if [ "$TLS_METHOD" = "certbot" ]; then
+    echo "[tls] WARN: TLS_METHOD=certbot — это алиас для certbot-standalone." >&2
+    echo "[tls] WARN: На сервере с nginx предпочтительнее certbot-webroot (без моргания)." >&2
+    TLS_METHOD="certbot-standalone"
+fi
+
 case "$TLS_METHOD" in
+    acme-webroot)
+        echo "[tls] Выпуск через acme.sh + webroot (через работающий nginx)..."
+        echo "[tls] Nginx не моргает. Webroot: ${WEBROOT_PATH}"
+
+        # shellcheck disable=SC2087  # client-side expansion намеренная
+        ssh "$SSH_TARGET" bash <<REMOTE_EOF
+set -e
+
+# Проверка: nginx должен быть установлен и запущен
+if ! systemctl is-active --quiet nginx 2>/dev/null; then
+    echo "ERROR: nginx не запущен — webroot-метод не сработает." >&2
+    echo "       Установи и запусти nginx, либо переключи TLS_METHOD на acme-standalone." >&2
+    exit 1
+fi
+
+# Создаём webroot-папку
+mkdir -p "${WEBROOT_PATH}/.well-known/acme-challenge"
+chown -R www-data:www-data "${WEBROOT_PATH}" 2>/dev/null || true
+
+# Добавляем location в дефолтный server-блок nginx (если его ещё нет).
+# Кладём в conf.d/00-letsencrypt-acme.conf — это «фрагмент», подключаемый
+# в любой server-блок через include. Чтобы не лезть в существующие vhost'ы.
+SNIPPET=/etc/nginx/snippets/letsencrypt-acme.conf
+mkdir -p /etc/nginx/snippets
+cat > \$SNIPPET <<'NGINX_SNIPPET'
+# Подключается через include snippets/letsencrypt-acme.conf;
+# в каждом server-блоке :80, чтобы ACME HTTP-01 проходил без останова nginx.
+location ^~ /.well-known/acme-challenge/ {
+    root ${WEBROOT_PATH};
+    default_type "text/plain";
+    try_files \$uri =404;
+}
+NGINX_SNIPPET
+
+# Если есть дефолтный server-блок без include — добавляем
+DEFAULT_CONF=/etc/nginx/sites-enabled/default
+if [ -f "\$DEFAULT_CONF" ] && ! grep -q "letsencrypt-acme" "\$DEFAULT_CONF"; then
+    # Вставляем include после первой строки 'listen 80;' первого server-блока
+    sed -i '0,/listen 80/{s|listen 80.*|&\n    include snippets/letsencrypt-acme.conf;|}' "\$DEFAULT_CONF"
+fi
+
+# Проверяем конфиг и перезагружаем
+nginx -t
+systemctl reload nginx
+
+# Ставим acme.sh если ещё нет
+if [ ! -f /root/.acme.sh/acme.sh ]; then
+    echo "[tls] acme.sh не найден, ставим..."
+    curl -s https://get.acme.sh | sh -s email=${ADMIN_EMAIL}
+fi
+
+ACME=/root/.acme.sh/acme.sh
+\$ACME --set-default-ca --server letsencrypt 2>/dev/null || true
+
+mkdir -p ${CERT_DIR}
+
+# Выпуск через webroot — без остановки nginx
+\$ACME --issue -d ${DOMAIN} -w ${WEBROOT_PATH} --keylength ec-256
+
+# Привязка к нашим путям + deploy-hook для рестарта 3X-UI
+\$ACME --install-cert -d ${DOMAIN} --ecc \\
+    --fullchain-file ${CERT_FILE} \\
+    --key-file ${KEY_FILE} \\
+    --reloadcmd "systemctl restart x-ui"
+
+echo "[tls] Сертификат выпущен через webroot: ${CERT_FILE}"
+ls -la ${CERT_DIR}
+REMOTE_EOF
+        ;;
+
+    certbot-webroot)
+        echo "[tls] Выпуск через certbot + webroot (через работающий nginx)..."
+        echo "[tls] Nginx не моргает. Webroot: ${WEBROOT_PATH}"
+
+        # shellcheck disable=SC2087  # client-side expansion намеренная
+        ssh "$SSH_TARGET" bash <<REMOTE_EOF
+set -e
+
+# Проверка: nginx должен быть установлен и запущен
+if ! systemctl is-active --quiet nginx 2>/dev/null; then
+    echo "ERROR: nginx не запущен — webroot-метод не сработает." >&2
+    echo "       Установи и запусти nginx, либо переключи TLS_METHOD на certbot-standalone." >&2
+    exit 1
+fi
+
+# Установка certbot если нет
+if ! command -v certbot >/dev/null 2>&1; then
+    if command -v apt-get >/dev/null 2>&1; then
+        apt-get update -qq && apt-get install -y certbot
+    elif command -v dnf >/dev/null 2>&1; then
+        dnf install -y certbot
+    elif command -v yum >/dev/null 2>&1; then
+        yum install -y certbot
+    else
+        echo "ERROR: не знаю как поставить certbot на этой ОС" >&2
+        exit 1
+    fi
+fi
+
+# Webroot-папка
+mkdir -p "${WEBROOT_PATH}/.well-known/acme-challenge"
+chown -R www-data:www-data "${WEBROOT_PATH}" 2>/dev/null || true
+
+# Snippet для nginx (тот же, что и в acme-webroot)
+SNIPPET=/etc/nginx/snippets/letsencrypt-acme.conf
+mkdir -p /etc/nginx/snippets
+cat > \$SNIPPET <<'NGINX_SNIPPET'
+location ^~ /.well-known/acme-challenge/ {
+    root ${WEBROOT_PATH};
+    default_type "text/plain";
+    try_files \$uri =404;
+}
+NGINX_SNIPPET
+
+DEFAULT_CONF=/etc/nginx/sites-enabled/default
+if [ -f "\$DEFAULT_CONF" ] && ! grep -q "letsencrypt-acme" "\$DEFAULT_CONF"; then
+    sed -i '0,/listen 80/{s|listen 80.*|&\n    include snippets/letsencrypt-acme.conf;|}' "\$DEFAULT_CONF"
+fi
+
+nginx -t
+systemctl reload nginx
+
+mkdir -p ${CERT_DIR}
+
+# Выпуск через webroot — без остановки nginx
+certbot certonly --webroot -w ${WEBROOT_PATH} -d ${DOMAIN} \\
+    --email ${ADMIN_EMAIL} --agree-tos --no-eff-email -n \\
+    --deploy-hook "systemctl restart x-ui"
+
+# Унификация путей: симлинки в /root/cert/\$DOMAIN/
+ln -sf /etc/letsencrypt/live/${DOMAIN}/fullchain.pem ${CERT_FILE}
+ln -sf /etc/letsencrypt/live/${DOMAIN}/privkey.pem ${KEY_FILE}
+
+echo "[tls] Сертификат выпущен через certbot-webroot: ${CERT_FILE}"
+echo "[tls] Симлинки на /etc/letsencrypt/live/${DOMAIN}/"
+ls -la ${CERT_DIR}
+REMOTE_EOF
+        ;;
+
     acme-standalone)
         echo "[tls] Выпуск через встроенный acme (standalone HTTP-01)..."
         echo "[tls] Это требует свободного порта 80 (временно)."
@@ -120,8 +272,8 @@ echo "[tls] Сертификат выпущен через DNS-01: ${CERT_FILE}"
 REMOTE_EOF
         ;;
 
-    certbot)
-        echo "[tls] Выпуск через certbot --standalone..."
+    certbot-standalone)
+        echo "[tls] Выпуск через certbot --standalone (моргает nginx)..."
 
         # shellcheck disable=SC2087  # client-side expansion намеренная
         ssh "$SSH_TARGET" bash <<REMOTE_EOF
@@ -159,7 +311,9 @@ REMOTE_EOF
         ;;
 
     *)
-        echo "ERROR: TLS_METHOD='$TLS_METHOD' не поддерживается. Допустимо: acme-standalone, acme-cloudflare, certbot" >&2
+        echo "ERROR: TLS_METHOD='$TLS_METHOD' не поддерживается." >&2
+        echo "       Допустимо: acme-webroot (дефолт) | certbot-webroot | acme-standalone | certbot-standalone | acme-cloudflare." >&2
+        echo "       См. references/tls-method-choice.md для выбора." >&2
         exit 2
         ;;
 esac

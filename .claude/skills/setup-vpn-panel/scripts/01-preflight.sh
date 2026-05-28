@@ -6,8 +6,12 @@
 #  - ОС (Ubuntu 22.04+ / Debian 12+ / другие из install.sh)
 #  - cloud-init завершён (если есть)
 #  - 3X-UI ещё не установлен
-#  - порты 80 и 443 свободны (нужны для acme HTTP-01)
 #  - порт PANEL_PORT не занят
+#  - 443 свободен (или нет — учитывается, но не блокирует)
+#  - порт 80 — зависит от TLS_METHOD:
+#      * *-webroot   → требует работающий nginx с server-блоком на 80
+#      * *-standalone → требует свободный 80 (или останавливаемый nginx)
+#      * acme-cloudflare → 80 безразличен
 #  - jq установлен на сервере
 #  - DNS: DOMAIN резолвится в IP сервера
 #
@@ -15,6 +19,7 @@
 #   SSH_TARGET (например, root@1.2.3.4 или alias из ~/.ssh/config)
 #   DOMAIN (например, vpn.example.com)
 #   PANEL_PORT (например, 48391)
+#   TLS_METHOD (по умолчанию acme-webroot)
 #
 # Выход:
 #   0 — всё ок, можно ставить
@@ -26,6 +31,12 @@ set -uo pipefail
 SSH_TARGET="${SSH_TARGET:?SSH_TARGET обязателен}"
 DOMAIN="${DOMAIN:?DOMAIN обязателен}"
 PANEL_PORT="${PANEL_PORT:?PANEL_PORT обязателен}"
+TLS_METHOD="${TLS_METHOD:-acme-webroot}"
+
+# Алиас обратной совместимости
+if [ "$TLS_METHOD" = "certbot" ]; then
+    TLS_METHOD="certbot-standalone"
+fi
 
 PROBLEMS=()
 WARNINGS=()
@@ -84,6 +95,27 @@ if command -v jq >/dev/null 2>&1; then
 else
     echo "JQ_MISSING"
 fi
+
+echo "----- NGINX -----"
+if systemctl is-active --quiet nginx 2>/dev/null; then
+    echo "NGINX_RUNNING"
+    # Есть ли server-блок с listen 80 в активных сайтах?
+    if find /etc/nginx/sites-enabled/ -type l -o -type f 2>/dev/null | \
+        xargs -r grep -l 'listen.*80' 2>/dev/null | grep -q .; then
+        echo "NGINX_HAS_80_VHOST"
+    else
+        echo "NGINX_NO_80_VHOST"
+    fi
+    # Есть ли пользовательские сайты (не дефолтный)?
+    if find /etc/nginx/sites-enabled/ -type l -o -type f 2>/dev/null | \
+        xargs -r grep -l 'listen.*80' 2>/dev/null | grep -qv '/default$'; then
+        echo "NGINX_HAS_USER_SITES"
+    fi
+elif command -v nginx >/dev/null 2>&1; then
+    echo "NGINX_INSTALLED_NOT_RUNNING"
+else
+    echo "NGINX_ABSENT"
+fi
 REMOTE_EOF
 )"
 
@@ -103,15 +135,51 @@ case "$OS_ID" in
         ;;
 esac
 
-if echo "$REMOTE_OUTPUT" | grep -q "PORT_BUSY:80"; then
-    PROBLEMS+=("Порт 80 занят на сервере (нужен для acme HTTP-01 challenge)")
-fi
+# Порт 443 — предупреждение, не блок (foreign-server может его требовать,
+# но это решается позже в configure-vpn-routing)
 if echo "$REMOTE_OUTPUT" | grep -q "PORT_BUSY:443"; then
-    PROBLEMS+=("Порт 443 занят на сервере (нужен для acme и опционально VLESS inbound)")
+    WARNINGS+=("Порт 443 занят. Если LOCATION=foreign-server и планируется Reality на 443 — решить позже в /configure-vpn-routing.")
 fi
+
 if echo "$REMOTE_OUTPUT" | grep -q "PORT_BUSY:${PANEL_PORT}"; then
     PROBLEMS+=("Порт PANEL_PORT=$PANEL_PORT занят на сервере")
 fi
+
+# ─── Условный анализ порта 80 + nginx по TLS_METHOD ───────────────────────────
+NGINX_RUNNING=0
+NGINX_HAS_80_VHOST=0
+PORT_80_BUSY=0
+echo "$REMOTE_OUTPUT" | grep -q "NGINX_RUNNING" && NGINX_RUNNING=1
+echo "$REMOTE_OUTPUT" | grep -q "NGINX_HAS_80_VHOST" && NGINX_HAS_80_VHOST=1
+echo "$REMOTE_OUTPUT" | grep -q "PORT_BUSY:80" && PORT_80_BUSY=1
+
+case "$TLS_METHOD" in
+    acme-webroot|certbot-webroot)
+        # Webroot требует работающий nginx с server-блоком на 80
+        if [ "$NGINX_RUNNING" = "0" ]; then
+            PROBLEMS+=("TLS_METHOD=$TLS_METHOD требует работающий nginx, но nginx не запущен. Установи и запусти nginx (если планируются сайты) или переключи TLS_METHOD на acme-standalone (если nginx не нужен).")
+        elif [ "$NGINX_HAS_80_VHOST" = "0" ]; then
+            WARNINGS+=("Nginx запущен, но нет server-блока с listen 80. Скилл добавит дефолтный, чтобы webroot заработал.")
+        fi
+        # Порт 80 ДОЛЖЕН быть занят nginx — это норма, не проблема
+        ;;
+
+    acme-standalone|certbot-standalone)
+        # Standalone требует свободный 80 (либо останавливаемый nginx)
+        if [ "$PORT_80_BUSY" = "1" ] && [ "$NGINX_RUNNING" = "0" ]; then
+            # 80 занят чем-то, что НЕ nginx — это блок
+            PROBLEMS+=("TLS_METHOD=$TLS_METHOD требует свободный 80, но он занят (и nginx не запущен — значит, что-то другое). Освободи или переключи метод.")
+        elif [ "$NGINX_HAS_80_VHOST" = "1" ]; then
+            # Nginx работает с сайтами — standalone их положит. Серьёзное предупреждение.
+            WARNINGS+=("На сервере работает nginx с сайтами на :80. TLS_METHOD=$TLS_METHOD остановит nginx на 30-60 сек при выпуске И при каждом renew (раз в 60 дней). РЕКОМЕНДУЮ переключить на ${TLS_METHOD%-standalone}-webroot — не моргает, см. references/tls-method-choice.md.")
+        fi
+        ;;
+
+    acme-cloudflare)
+        # 80 безразличен, главное — CF-ключи
+        : # отдельно проверяется наличие CLOUDFLARE_EMAIL/KEY в скилле
+        ;;
+esac
 
 if echo "$REMOTE_OUTPUT" | grep -q "JQ_MISSING"; then
     WARNINGS+=("jq не установлен на сервере — будет поставлен при установке")
