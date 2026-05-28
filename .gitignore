@@ -28,3 +28,4 @@ sysadmin-config.json
 # Временные артефакты ревизий и audit-сессий (Explore-агенты,
 # промежуточные отчёты) — не часть репо.
 .audit-tmp/
+vpn-clients/
