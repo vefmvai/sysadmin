@@ -1,16 +1,49 @@
 # docker-compose.yml — заготовка для нового сервиса (deploy-service skill).
 #
+# СЕТЕВАЯ РАСКЛАДКА — эталон в
+# `.claude/knowledge/networking/_reference/server-networks-defaults.md`
+# (§3 «эталонная 4-сеть-сегментация», §4 «decision tree», §5 «подводные камни»).
+# Выбери одну из раскладок A/B/C ниже под свой сервис; раскладки А-С — это
+# готовые комбинации из decision tree §4 эталона.
+#
 # Заменить плейсхолдеры:
-#   <SERVICE_NAME>  — имя сервиса в kebab-case (например, my-app, kuma, ghost)
+#   <SERVICE_NAME>  — имя сервиса в kebab-case (например, my-app, kuma, ghost).
+#                     ВАЖНО: имя сервиса автоматически становится DNS-алиасом
+#                     в user-defined сети (см. эталон §5.3). Nginx ходит к
+#                     апстриму по этому имени — переименование требует синхр.
+#                     правки во ВСЕХ `proxy_pass http://<name>:...`.
 #   <IMAGE>         — pinned tag (например, ghost:5.87.2 — НЕ :latest;
 #                     принцип pin'а — ADR 0010 проекта-носителя или эквивалент)
 #   <PORT>          — внутренний порт контейнера
-#   <NETWORK>       — сеть для подключения (services / data — см. ADR 0012
-#                     или эквивалентное решение по сегментации сетей)
 #   <MEM_LIMIT>     — лимит памяти (256m / 512m / 1g — принцип ADR 0009
 #                     или эквивалент: peak_observed × 1.5)
 #
 # После замены — git add, git commit, ./scripts/deploy/deploy-remote.sh.
+#
+# ===== РАСКЛАДКИ СЕТЕЙ =====
+#
+# Раскладка A — простой веб-сервис за nginx, без БД:
+#   networks: [services]
+#   ports: НЕ ИСПОЛЬЗОВАТЬ (nginx ходит к <SERVICE_NAME>:<PORT> через сеть services)
+#
+# Раскладка B — сервис с собственной БД (frontend + backend):
+#   networks: [services, data]            # на app-контейнере
+#   networks: [data, services]            # на postgres (двойная сеть — паттерн §3.3)
+#   ports: НЕ ИСПОЛЬЗОВАТЬ для app; на postgres "127.0.0.1:5432:5432" если нужен psql с хоста
+#   Причина двойной сети у postgres: data internal=true ломает DNAT для publish (§5.1).
+#
+# Раскладка C — нужен publish для доступа с хоста / для nginx-host через 127.0.0.1:
+#   networks: [services]
+#   ports: ["127.0.0.1:<PORT>:<PORT>"]    # НИКОГДА без префикса 127.0.0.1
+#
+# Антипаттерны, которые НЕ использовать (см. эталон §1.2 и §2.1):
+#   - networks: [default] или вообще без networks: → default bridge, нет DNS по имени
+#   - ports: ["<PORT>:<PORT>"] без префикса 127.0.0.1 → публикация на 0.0.0.0,
+#     контейнер торчит в интернет в обход UFW (§7 эталона)
+#   - network_mode: host без обоснования в ADR (§6 эталона)
+#   - монтирование /var/run/docker.sock без :ro (§8 эталона)
+#
+# ===== ШАБЛОН =====
 
 services:
   <SERVICE_NAME>:
@@ -19,7 +52,9 @@ services:
     restart: unless-stopped
     env_file: .env
     networks:
-      - <NETWORK>
+      - services    # Раскладка A. Для B заменить/добавить data; для C оставить services + добавить ports ниже.
+    # ports:
+    #   - "127.0.0.1:<PORT>:<PORT>"   # ТОЛЬКО для раскладки C, ТОЛЬКО с префиксом 127.0.0.1
     # volumes:
     #   - <SERVICE_NAME>_data:/var/lib/<SERVICE_NAME>
     mem_limit: <MEM_LIMIT>
@@ -39,8 +74,10 @@ services:
       com.infra.deploy-pattern: "push-to-pull"  # ADR 0015 проекта-носителя или эквивалент
 
 networks:
-  <NETWORK>:
+  services:
     external: true
+  # data:
+  #   external: true   # раскомментировать для раскладки B; имя сети может отличаться в твоём стеке (см. эталон §3)
 
 # volumes:
 #   <SERVICE_NAME>_data:

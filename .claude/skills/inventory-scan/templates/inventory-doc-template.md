@@ -34,6 +34,14 @@
 
 services.md     — | container_name | image | networks | ports | health |
 networks.md     — | name | driver | internal | subnet | aliases |
+                  Колонка `internal` ОБЯЗАТЕЛЬНА: явный `true` / `false`. Это
+                  ключевое свойство сети для понимания топологии и безопасности
+                  (см. эталон `_reference/server-networks-defaults.md` §3). Для
+                  `true` — в Заметках оператора обязательно указать ЗАЧЕМ
+                  (защита БД от утечек / прокси-only сеть / другое). Эталонные
+                  имена и роли (data internal / services / proxy-corridor /
+                  monitoring) — в §3 эталона; имена в стеке оператора могут
+                  отличаться, важны роли и свойства.
 volumes.md      — | volume | driver | mountpoint | size | used_by |
 databases.md    — | db_name | container | port | role | size |
 domains.md      — | domain | dns_target | tls_source | nginx_block |

@@ -49,6 +49,7 @@
 | `xray-mac-chain.md` | Xray chain (VLESS→VLESS) на Mac для Claude Code: proxy-only bypass WL |
 | `subscription-mirroring.md` | Зеркалирование платной подписки на свой сервер (обход лимита устройств): извлечение → раздача через nginx /c/ → автосинк cron с канон-сравнением |
 | `web-and-vpn-coexistence.md` | **Сайты + VPN на одном сервере (кто слушает 443)** — почему Reality и nginx не делят порт, 4 раскладки (A/B/C/D), decision tree, как развязать конфликт без обрыва живых клиентов |
+| `server-networks-defaults.md` | **Серверные сети по умолчанию (Docker, сегментация, firewall)** — уровень «весь сервер целиком»: 4-сеть-сегментация (data internal / services / proxy-corridor / monitoring), expose vs publish vs host network, decision tree для нового сервиса, паттерн БД-в-двух-сетях, host network как исключение, UFW+Docker, `/var/run/docker.sock` как root-эквивалент |
 
 ### `_meta/` — мета-слой (TTL 365 дней)
 

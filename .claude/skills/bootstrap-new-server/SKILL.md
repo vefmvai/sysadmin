@@ -146,6 +146,44 @@ ssh $ADMIN_USER@$SERVER_IP -p $SSH_PORT "docker --version && docker compose vers
 
 После добавления в группу `docker` оператору нужен relogin (или `newgrp docker`) — скрипт это печатает в конце.
 
+## Шаг 4.1: Canonical docker-сеть `services` (рекомендация, не блокер)
+
+**Зачем:** прививает паттерн **user-defined network с первой минуты**. Без этого шага первый
+же `docker compose up` без явной `networks:` секции попадёт на встроенный `bridge` (`docker0`),
+где DNS по имени сервиса не работает. Эталон сетевой раскладки — `.claude/knowledge/networking/_reference/server-networks-defaults.md`
+(§3 эталонная 4-сеть-модель, §4 decision tree).
+
+**Что делать:**
+
+```bash
+ssh $ADMIN_USER@$SERVER_IP -p $SSH_PORT "docker network create services"
+```
+
+**Verify:**
+
+```bash
+ssh $ADMIN_USER@$SERVER_IP -p $SSH_PORT "docker network ls | grep services"
+```
+
+Должна появиться строка с `services` (драйвер `bridge`).
+
+**Опционально (когда понятно, что на сервере будут БД и наблюдаемость):**
+
+```bash
+ssh $ADMIN_USER@$SERVER_IP -p $SSH_PORT "
+docker network create --internal data &&
+docker network create monitoring
+"
+```
+
+`data` сразу создаётся с `--internal` (запрет egress в интернет — защита БД даже при
+компрометации приложения). Если БД нужен publish для psql с хоста — добавляется по
+паттерну postgres-в-двух-сетях из эталона §3.3.
+
+**Это рекомендация, не блокер.** Bootstrap корректно завершится и без 4.1 — но первый
+`deploy-service` тогда столкнётся с необходимостью создать сеть руками. Когда оператор
+ещё не знает, какой сервис будет первым, имеет смысл создать хотя бы `services`.
+
 ## Шаг 5: Структура /opt + git-init (`scripts/05-git-init.sh`)
 
 **Что делает:**
@@ -191,6 +229,12 @@ ssh $ADMIN_USER@$SERVER_IP -p $SSH_PORT "ls -la $INFRA_DIR && cd $INFRA_DIR && g
 вынужден был бы заново спрашивать «какой у тебя менеджер паролей», «нужны ли алерты»
 и т.д. — это alert fatigue.
 
+**Перед первым деплоем** (`/deploy-service`): прочитать
+`.claude/knowledge/networking/_reference/server-networks-defaults.md` — особенно §3
+«эталонная 4-сеть-сегментация» и §4 «decision tree». Это эталон сетевой раскладки сервера
+(какие сети создавать, что выставлять наружу, как nginx общается с контейнерами). Если на
+шаге 4.1 уже создана сеть `services` — первый деплой пройдёт по дефолту-A раскладки.
+
 # Failed Attempts (граблекейс)
 
 - **«bootstrap → сразу setup-backups, без `/sysadmin-init`»** — оператор пропустил
@@ -200,7 +244,7 @@ ssh $ADMIN_USER@$SERVER_IP -p $SSH_PORT "ls -la $INFRA_DIR && cd $INFRA_DIR && g
 - **«Делал bootstrap зависимым от конфига»** — конфига на свежем сервере не существует
   по определению. Урок: bootstrap — OPTIONAL-режим чтения конфига (если есть локально
   на машине оператора — подхватит `language` и `operator.timezone`, иначе defaults).
-- **«UFW работает в Docker»** — UFW и Docker конфликтуют по iptables. Docker по умолчанию обходит UFW для контейнеров с `ports:`. Решение: либо `iptables=false` в `/etc/docker/daemon.json` (но тогда контейнеры теряют сеть), либо настройка `DOCKER-USER` chain в UFW — см. `references/ubuntu-vs-debian-quirks.md`. На свежем сервере без контейнеров пока не критично, но знай заранее.
+- **«UFW работает в Docker»** — UFW и Docker конфликтуют по iptables. Docker по умолчанию обходит UFW для контейнеров с `ports:`. Решение: либо `iptables=false` в `/etc/docker/daemon.json` (но тогда контейнеры теряют сеть), либо настройка `DOCKER-USER` chain в UFW — см. `references/ubuntu-vs-debian-quirks.md`. На свежем сервере без контейнеров пока не критично, но знай заранее. Полная картина (3 решения по возрастанию радикальности + дефолт `127.0.0.1:port` биндинг) — в эталоне `.claude/knowledge/networking/_reference/server-networks-defaults.md` §7.
 - **«acme.sh поставится с Docker»** — лучше отдельным шагом после bootstrap, не входит в этот скилл. Делается вручную при первом TLS-сертификате (для каждого сервера домены индивидуальны).
 - **«SSH-порт 22 — небезопасно»** — миф. fail2ban + ключи + отключённый PasswordAuthentication защищают; смена порта — security through obscurity. Меняем по желанию (меньше шума в логах), не по необходимости.
 - **«PermitRootLogin without-password — компромисс»** — нет, отключай полностью (`no`). Если корневой ключ скомпрометирован — последствия фатальны. У оператора есть `sudo` через `$ADMIN_USER`.
