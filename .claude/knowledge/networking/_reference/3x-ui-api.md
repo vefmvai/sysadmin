@@ -1,15 +1,18 @@
 ---
 knowledge_domain: vpn
 layer: reference
-last_researched: 2026-05-15
+last_researched: 2026-05-28
 ttl_days: 60
 sources_checked:
   - https://www.postman.com/hsanaei/3x-ui/documentation/q1l5l0u/3x-ui
   - https://github.com/MHSanaei/3x-ui
   - https://github.com/MHSanaei/3x-ui/releases
+  - https://github.com/MHSanaei/3x-ui/releases/tag/v3.0.0
+  - https://github.com/MHSanaei/3x-ui/issues/4227
   - https://github.com/MHSanaei/3x-ui/issues
   - https://github.com/iamhelitha/3xui-api-client
   - https://github.com/mehdikhody/3x-ui-js
+  - https://github.com/iwatkot/py3xui
   - https://packagist.org/packages/estaheri/3x-ui
   - https://pkg.go.dev/github.com/mhsanaei/3x-ui/v2/xray
   - https://deepwiki.com/MHSanaei/3x-ui/4.1-inbound-management
@@ -58,35 +61,85 @@ https://vpn.example.com:48391/abc123xyz0/login
 
 ## 2. Аутентификация и сессия
 
-### 2.1 Логин
+> ⚠️ **Breaking change в v3.0.0 (2026-05):** добавлен CSRF middleware.
+> Голый POST на `/login` без CSRF-токена отбивается **HTTP 403** —
+> панель полностью исправна, ломается только программный вход
+> по старым клиентам. Подтверждено release notes автора
+> (`feat(security): CSRF protection and security hardening across the
+> application`) и issue #4227. Это не редкий частный случай — это
+> новый дефолт в любой свежей установке 3X-UI.
+>
+> **Совместимая стратегия для скиллов:** двухшаговый логин (см. §2.1)
+> с автодетектом — на v2.x работает «как раньше», на v3.0+ автоматически
+> подхватывает CSRF-токен. Альтернатива — Bearer-token (см. §2.4),
+> устойчивее, но требует ручного создания токена в UI.
 
-POST на `/login` (без префикса `/panel/api/`!) с form-data:
+### 2.1 Логин с автодетектом CSRF (рекомендуемый путь)
+
+Алгоритм для скриптов:
+
+1. **GET** страницы логина, сохранить cookie + извлечь CSRF-токен.
+   Токен либо в HTML-мете (`<meta name="csrf-token" content="...">`),
+   либо берётся отдельным эндпоинтом `GET /csrf-token` (появился в
+   v3.0.x).
+2. **POST** на `/login` с form-data **и заголовком** `x-csrf-token: <token>`.
+3. Если первый POST вернул HTTP 200 без CSRF (`success: true`) — на сервере
+   старая версия (≤ v2.x), CSRF не нужен. Если 403 — переключиться на
+   CSRF-режим и повторить.
+
+Минимальный bash-пример:
 
 ```bash
 COOKIE_JAR=$(mktemp)
+BASE="https://${DOMAIN}:${PORT}/${WEB_PATH}"
 
-curl -s -c "$COOKIE_JAR" \
-  -X POST "https://${DOMAIN}:${PORT}/${WEB_PATH}/login" \
-  -d "username=${ADMIN_LOGIN}&password=${ADMIN_PASSWORD}"
+# Шаг 1: HEAD/GET страницы логина — получаем session-cookie и CSRF-токен
+LOGIN_HTML="$(curl -sS -c "$COOKIE_JAR" -b "$COOKIE_JAR" "${BASE}/login")"
+CSRF_TOKEN="$(printf '%s' "$LOGIN_HTML" \
+    | grep -oE '<meta[^>]+name="csrf-token"[^>]+content="[^"]+"' \
+    | sed -E 's/.*content="([^"]+)".*/\1/' | head -n1)"
+
+# Запасной путь: отдельный эндпоинт /csrf-token (v3.0.x)
+if [ -z "$CSRF_TOKEN" ]; then
+    CSRF_TOKEN="$(curl -sS -c "$COOKIE_JAR" -b "$COOKIE_JAR" "${BASE}/csrf-token" \
+        | jq -r '.token // .csrfToken // empty' 2>/dev/null)"
+fi
+
+# Шаг 2: POST /login
+CSRF_HEADER=()
+[ -n "$CSRF_TOKEN" ] && CSRF_HEADER=(-H "x-csrf-token: ${CSRF_TOKEN}")
+
+curl -sS -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
+    "${CSRF_HEADER[@]}" \
+    -X POST "${BASE}/login" \
+    -d "username=${ADMIN_LOGIN}&password=${ADMIN_PASSWORD}"
 ```
 
-Ответ — JSON:
+Ответ при успехе:
 ```json
 { "success": true, "msg": "Login Successfully", "obj": null }
 ```
 
-Если `success: false` — `msg` содержит причину (`Username or password is incorrect`,
-`Login attempt limit exceeded` и т.п.).
-
-Cookie сессии сохраняется в `$COOKIE_JAR` (формат Netscape, стандартный
-для curl). Эта cookie используется во всех последующих запросах.
+Если CSRF-токен невалидный/просроченный — `HTTP 403` (пустое тело,
+рубит middleware до хендлера). Если логин/пароль не подошли — `HTTP 200`
++ `success: false` + `msg: "Username or password is incorrect"`. Это
+два **разных** канала ошибок, скилл должен их различать.
 
 ### 2.2 Использование сессии
+
+После успешного логина все обычные API-запросы продолжают работать
+по cookie-сессии:
 
 ```bash
 curl -s -b "$COOKIE_JAR" \
   "https://${DOMAIN}:${PORT}/${WEB_PATH}/panel/api/inbounds/list"
 ```
+
+**На POST/PUT/DELETE-запросы в v3.0+ CSRF-токен обычно НЕ нужен** —
+middleware проверяет его только на `/login` и нескольких других
+чувствительных путях (`/xray/update`, `/logout`). Но если конкретный
+эндпоинт начал отбивать 403 — добавь `x-csrf-token` к запросу
+(токен переиспользуется, не одноразовый).
 
 ### 2.3 Срок жизни сессии
 
@@ -95,9 +148,40 @@ curl -s -b "$COOKIE_JAR" \
 restart), может использовать одну cookie от начала до конца.
 
 **Если сессия истекла** (например, между разными скиллами) — повторный
-вызов `/login` создаст новую cookie.
+вызов `api_login` сделает новый GET + POST с новым CSRF-токеном.
 
-### 2.4 Безопасная очистка
+### 2.4 Альтернатива: Bearer-token (устойчивее CSRF)
+
+3X-UI v3.0+ поддерживает **персональные API-токены** — создаются в UI
+панели (Settings → Security → API Tokens). Скилл, у которого есть готовый
+токен, может вообще не делать `/login`:
+
+```bash
+curl -sS \
+  -H "Authorization: Bearer ${API_TOKEN}" \
+  "https://${DOMAIN}:${PORT}/${WEB_PATH}/panel/api/inbounds/list"
+```
+
+Преимущества:
+- Не зависит от CSRF — токен сам по себе авторизация.
+- Не нужно хранить пароль админа в менеджере паролей оператора.
+- v3.0.2+ поддерживает несколько именованных токенов с разными правами —
+  можно выдать скилу токен с ограниченным scope.
+
+Минусы:
+- Токен надо создать **руками** в UI первый раз (или импортировать из
+  install-output после первой установки v3.0+).
+- В v2.x и ранних v3.0 этого механизма нет — нужен fallback на
+  username/password.
+
+**Когда что использовать в скиллах:**
+- В первой установке (скилл `/setup-vpn-panel`) — username/password,
+  потому что токена ещё нет.
+- В повторных запусках (`/configure-vpn-routing`, `/generate-client-config`)
+  — если в `sysadmin-config.json` есть `panel_api_token` → использовать
+  Bearer; иначе fallback на двухшаговый CSRF-логин.
+
+### 2.5 Безопасная очистка
 
 В конце скилла:
 
@@ -106,6 +190,7 @@ rm -f "$COOKIE_JAR"
 ```
 
 (cookie содержит токен с правами админа панели — не должна валяться).
+Bearer-токен в ENV — не утекает в файл, но не логируй его в `_3xui_log`.
 
 ---
 
@@ -596,13 +681,27 @@ https://{DOMAIN}:{PANEL_PORT}/{SUBSCRIPTION_PATH}/{CLIENT_UUID}
 
 ### 10.1 Текущее состояние (2026-05)
 
-- **v1 REST API** — рабочий, документированный, стабильный. Эндпоинты как
-  выше (`/panel/api/...`).
+- **v1 REST API** — рабочий, документированный. Эндпоинты как выше
+  (`/panel/api/...`). **Не «полностью стабильный»: в v3.0.0 добавлен CSRF
+  middleware (см. §2), это первый известный breaking change для скриптов
+  логина за всю историю API.** В v3.0.2 — расширение: именованные
+  Bearer-токены, SSRF-защита, CSP nonce, CSRF на logout, trusted proxies.
 - **v2 gRPC API** — внутренний, для управления самим Xray-ядром. Используется
   изнутри панели, для внешних скиллов **не предназначен**.
 
 Скиллы сисадмина работают **только через v1 REST**. v2 gRPC появляется в
 исходниках (`mhsanaei/3x-ui/v2/xray`), но это не публичный контракт.
+
+**Совместимость по версиям:**
+
+| Версия панели | Что нужно скрипту для логина |
+|---|---|
+| ≤ 2.x | Голый POST `/login` с username/password (как раньше). |
+| ≥ 3.0.0 | GET с куки → выдернуть `csrf-token` → POST `/login` с заголовком `x-csrf-token`. **ИЛИ** Bearer API-токен из UI. |
+| ≥ 3.0.2 | Доп. опция: несколько именованных Bearer-токенов с разными правами. |
+
+Скилл должен **детектить версию автоматически**, а не требовать от
+оператора выбирать режим — это работа `api_login` в `_lib-api.sh`.
 
 ### 10.2 In-panel API documentation (с v3.0.1)
 

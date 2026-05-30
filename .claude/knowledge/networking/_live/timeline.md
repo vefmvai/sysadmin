@@ -377,3 +377,17 @@ mode: append-only
 **Влияние на стратегию оператора:** **Happ становится основным рекомендованным клиентом** агента (кроссплатформенный, Xray-ядро, умеет on-device routing — агент под него заточен, собирает routing-профили). Hiddify/Karing/v2rayN/sing-box/v2rayNG — альтернативы. Рекомендации по умолчанию в персоне (§3.8.3), `vpn-reflexes.md`, `client-apps.md`, `vpn-consultation-flow.md`, `frontline-ru.md` приведены в соответствие. Зафиксировано в ADR-0007.
 
 **Зафиксировано в:** ADR-0007, _reference/client-apps.md §1/§2.2/§3.6, _live/frontline-ru.md (блок «что работает» и таблица стратегий), .claude/agents/sysadmin.md §3.8.3, .claude/agents/references/vpn-reflexes.md §3.8.3
+
+---
+
+## 2026-05-28 — 3X-UI v3.0.0+ ввёл CSRF, старые API-скрипты ловят 403 на /login
+
+**Категория:** релиз панели (breaking change для скриптов)
+**Вес источника:** HIGH (release notes автора панели + воспроизведённая баг-репорта community)
+**Источник:** https://github.com/MHSanaei/3x-ui/releases/tag/v3.0.0 (release notes: «feat(security): CSRF protection and security hardening across the application»); https://github.com/MHSanaei/3x-ui/issues/4227 (баг-репорт «API in v3.0.0», 2026-05-10, закрыт как question — описан конкретный обход с заголовком `x-csrf-token`); независимый перепрогон Поляковой (ученицы 5-го модуля) на свежей установке v3.1.0 — 2026-05-28.
+
+**Что произошло:** В 3X-UI v3.0.0 (релиз начала мая 2026) добавлен CSRF middleware. Голый POST на `/login` с username/password — как делали все скилл-скрипты до сих пор — возвращает HTTP 403 с пустым телом. Через UI в браузере вход работает штатно: страница логина получает CSRF-токен прямо в HTML (`<meta name="csrf-token">`) и шлёт его заголовком `x-csrf-token`. В v3.0.2 защита расширена (CSRF на logout, SSRF, CSP nonce, trusted proxies, именованные Bearer-токены). Наш helper `scripts/lib-api/3xui.sh` написан под v2.x — на свежей панели падает на первом же вызове `api_login`, ломая все четыре VPN-скилла.
+
+**Влияние на стратегию оператора:** Любая новая установка панели (после ~05.2026) — это уже v3.0.0+, наши скилл-скрипты на ней не работают «из коробки». Требуется обновить `scripts/lib-api/3xui.sh` под двухшаговый логин (GET → CSRF-токен → POST с заголовком) и параллельно дать опцию Bearer-token (более устойчиво — не зависит от страницы логина). До обновления — `/configure-vpn-routing` и соседи на свежих установках мертвы.
+
+**Зафиксировано в:** _reference/3x-ui-api.md §2 (расширен) и §10.1 (breaking change в таблице совместимости), scripts/lib-api/3xui.sh (правка в этом же коммите).

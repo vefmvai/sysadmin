@@ -51,6 +51,10 @@ _3XUI_COOKIE_JAR=""
 _3XUI_DEFAULT_TIMEOUT=10
 _3XUI_DEFAULT_RETRIES=3
 _3XUI_MASS_PAUSE_MS=150   # пауза между массовыми запросами
+_3XUI_AUTH_MODE=""        # "" | "cookie" | "bearer"
+_3XUI_BEARER_TOKEN=""     # активный Bearer-токен (не логируется)
+_3XUI_CSRF_TOKEN=""       # активный CSRF-токен (переиспользуется на чувствительных эндпоинтах)
+_3XUI_PANEL_VERSION=""    # "legacy" (≤v2.x) | "v3+" (с CSRF) — выясняется в api_login
 
 # ─── Утилиты ──────────────────────────────────────────────────────────────────
 _3xui_die() {
@@ -143,8 +147,17 @@ _3xui_parse_args() {
 
 # ─── Публичный API ────────────────────────────────────────────────────────────
 
-# api_login --domain X --port N --web-path P --admin U --password-ref REF
-# Сохраняет сессию во внутреннюю cookie. Не выводит пароль.
+# api_login --domain X --port N --web-path P [--admin U --password-ref REF | --bearer-token-ref REF]
+# Поддерживает два режима:
+#   1. Username/password (двухшаговый с автодетектом CSRF v3.0.0+).
+#   2. Bearer-token (через --bearer-token-ref) — устойчивее, не зависит от CSRF.
+#      Токен предварительно создан в UI панели (Settings → Security → API Tokens).
+#
+# При первом запуске на свежей v3.0+ панели рекомендуется username/password
+# (токена ещё нет). В повторных запусках, если в sysadmin-config.json есть
+# panel_api_token — лучше Bearer.
+#
+# Сохраняет состояние во внутренние переменные. Не выводит секреты в лог.
 api_login() {
     _3xui_require curl
     _3xui_require jq
@@ -155,11 +168,35 @@ api_login() {
     local web_path="${_3XUI_ARGS[web-path]:-}"
     local admin="${_3XUI_ARGS[admin]:-}"
     local password_ref="${_3XUI_ARGS[password-ref]:-}"
+    local bearer_ref="${_3XUI_ARGS[bearer-token-ref]:-}"
 
     [ -z "$domain" ] && _3xui_die "--domain обязателен" && return 2
     [ -z "$port" ] && _3xui_die "--port обязателен" && return 2
-    [ -z "$admin" ] && _3xui_die "--admin обязателен" && return 2
-    [ -z "$password_ref" ] && _3xui_die "--password-ref обязателен" && return 2
+
+    _3XUI_DOMAIN="$domain"
+    _3XUI_PORT="$port"
+    _3XUI_WEB_PATH="$web_path"
+    _3XUI_BASE_URL="$(_3xui_build_base_url "$domain" "$port" "$web_path")"
+
+    # ─── Bearer-режим ─────────────────────────────────────────────────────
+    if [ -n "$bearer_ref" ]; then
+        local token
+        token="$(_3xui_resolve_password "$bearer_ref")"
+        if [ -z "$token" ]; then
+            _3xui_die "Не удалось получить Bearer-токен по ссылке '$bearer_ref'"
+            return 1
+        fi
+        _3XUI_BEARER_TOKEN="$token"
+        _3XUI_AUTH_MODE="bearer"
+        _3XUI_COOKIE_JAR=""   # cookie не нужен
+        trap 'api_logout 2>/dev/null || true' EXIT INT TERM
+        _3xui_log "Login OK (bearer mode)"
+        return 0
+    fi
+
+    # ─── Username/password режим ──────────────────────────────────────────
+    [ -z "$admin" ] && _3xui_die "--admin обязателен (или передай --bearer-token-ref)" && return 2
+    [ -z "$password_ref" ] && _3xui_die "--password-ref обязателен (или передай --bearer-token-ref)" && return 2
 
     local password
     password="$(_3xui_resolve_password "$password_ref")"
@@ -168,29 +205,126 @@ api_login() {
         return 1
     fi
 
-    _3XUI_DOMAIN="$domain"
-    _3XUI_PORT="$port"
-    _3XUI_WEB_PATH="$web_path"
-    _3XUI_BASE_URL="$(_3xui_build_base_url "$domain" "$port" "$web_path")"
     _3XUI_COOKIE_JAR="$(mktemp -t 3xui-cookie.XXXXXX)"
+    _3XUI_AUTH_MODE="cookie"
 
     # Cleanup при завершении (защита cookie с токеном)
     trap 'api_logout 2>/dev/null || true' EXIT INT TERM
 
-    _3xui_log "Login → ${_3XUI_BASE_URL}/login (admin=$admin)"
-
-    local response
-    response="$(
+    # Шаг 1: GET страницы логина — получить session-cookie + CSRF-токен.
+    _3xui_log "Login step 1: GET ${_3XUI_BASE_URL}/login (probe CSRF)"
+    local login_html
+    login_html="$(
         curl -sS \
             --max-time "$_3XUI_DEFAULT_TIMEOUT" \
-            -c "$_3XUI_COOKIE_JAR" \
-            -X POST "${_3XUI_BASE_URL}/login" \
-            -d "username=${admin}&password=${password}" \
-            2>&1
-    )" || {
-        _3xui_die "Login: curl failed: $response"
+            -c "$_3XUI_COOKIE_JAR" -b "$_3XUI_COOKIE_JAR" \
+            "${_3XUI_BASE_URL}/login" \
+            2>/dev/null
+    )" || login_html=""
+
+    # Попытка №1: CSRF в HTML-мете <meta name="csrf-token" content="...">
+    _3XUI_CSRF_TOKEN="$(
+        printf '%s' "$login_html" \
+            | grep -oE '<meta[^>]+name="csrf-token"[^>]+content="[^"]+"' \
+            | sed -E 's/.*content="([^"]+)".*/\1/' \
+            | head -n1
+    )"
+
+    # Попытка №2: отдельный endpoint /csrf-token (v3.0.x)
+    if [ -z "$_3XUI_CSRF_TOKEN" ]; then
+        local csrf_resp
+        csrf_resp="$(
+            curl -sS \
+                --max-time "$_3XUI_DEFAULT_TIMEOUT" \
+                -c "$_3XUI_COOKIE_JAR" -b "$_3XUI_COOKIE_JAR" \
+                "${_3XUI_BASE_URL}/csrf-token" \
+                2>/dev/null
+        )" || csrf_resp=""
+        _3XUI_CSRF_TOKEN="$(printf '%s' "$csrf_resp" \
+            | jq -r '.token // .csrfToken // .obj // empty' 2>/dev/null)"
+    fi
+
+    if [ -n "$_3XUI_CSRF_TOKEN" ]; then
+        _3XUI_PANEL_VERSION="v3+"
+        _3xui_log "CSRF token acquired (panel v3.0+)"
+    else
+        _3XUI_PANEL_VERSION="legacy"
+        _3xui_log "No CSRF token (panel likely v2.x — legacy login)"
+    fi
+
+    # Шаг 2: POST /login. Заголовок CSRF — только если токен есть.
+    _3xui_log "Login step 2: POST ${_3XUI_BASE_URL}/login (admin=$admin, csrf=${_3XUI_PANEL_VERSION})"
+
+    local curl_args=(
+        -sS
+        --max-time "$_3XUI_DEFAULT_TIMEOUT"
+        -c "$_3XUI_COOKIE_JAR" -b "$_3XUI_COOKIE_JAR"
+        -X POST
+        -d "username=${admin}&password=${password}"
+        -w "\n__HTTP_CODE__%{http_code}"
+    )
+    [ -n "$_3XUI_CSRF_TOKEN" ] && curl_args+=(-H "x-csrf-token: ${_3XUI_CSRF_TOKEN}")
+    curl_args+=("${_3XUI_BASE_URL}/login")
+
+    local raw
+    raw="$(curl "${curl_args[@]}" 2>&1)" || {
+        _3xui_die "Login: curl failed: $raw"
         return 1
     }
+    local http_code response
+    http_code="$(echo "$raw" | grep "__HTTP_CODE__" | sed 's/.*__HTTP_CODE__//')"
+    response="$(echo "$raw" | grep -v "__HTTP_CODE__")"
+
+    # HTTP 403 = CSRF-middleware отбила запрос.
+    # Это два сценария:
+    #  - токен невалидный/просрочился — попробовать обновить и повторить;
+    #  - токен не нашли, а на сервере на самом деле v3.0+ — повторить с GET /csrf-token.
+    if [ "$http_code" = "403" ]; then
+        _3xui_log "POST /login → 403 (CSRF rejected). Refreshing CSRF token and retrying."
+
+        # Принудительно дёргаем /csrf-token эндпоинт ещё раз
+        local csrf_resp2
+        csrf_resp2="$(
+            curl -sS \
+                --max-time "$_3XUI_DEFAULT_TIMEOUT" \
+                -c "$_3XUI_COOKIE_JAR" -b "$_3XUI_COOKIE_JAR" \
+                "${_3XUI_BASE_URL}/csrf-token" \
+                2>/dev/null
+        )" || csrf_resp2=""
+        local new_csrf
+        new_csrf="$(printf '%s' "$csrf_resp2" \
+            | jq -r '.token // .csrfToken // .obj // empty' 2>/dev/null)"
+
+        if [ -z "$new_csrf" ]; then
+            _3xui_die "Login: 403 на POST /login и не удалось получить CSRF-токен через /csrf-token. Проверь версию панели и доступ к /login через браузер."
+            return 1
+        fi
+
+        _3XUI_CSRF_TOKEN="$new_csrf"
+        _3XUI_PANEL_VERSION="v3+"
+
+        local curl_args2=(
+            -sS
+            --max-time "$_3XUI_DEFAULT_TIMEOUT"
+            -c "$_3XUI_COOKIE_JAR" -b "$_3XUI_COOKIE_JAR"
+            -X POST
+            -d "username=${admin}&password=${password}"
+            -H "x-csrf-token: ${_3XUI_CSRF_TOKEN}"
+            -w "\n__HTTP_CODE__%{http_code}"
+            "${_3XUI_BASE_URL}/login"
+        )
+        raw="$(curl "${curl_args2[@]}" 2>&1)" || {
+            _3xui_die "Login retry: curl failed: $raw"
+            return 1
+        }
+        http_code="$(echo "$raw" | grep "__HTTP_CODE__" | sed 's/.*__HTTP_CODE__//')"
+        response="$(echo "$raw" | grep -v "__HTTP_CODE__")"
+    fi
+
+    if [ "$http_code" != "200" ]; then
+        _3xui_die "Login: HTTP $http_code (ожидался 200). Тело ответа: $response"
+        return 1
+    fi
 
     local success
     success="$(echo "$response" | jq -r '.success // false' 2>/dev/null)"
@@ -201,7 +335,7 @@ api_login() {
         return 1
     fi
 
-    _3xui_log "Login OK"
+    _3xui_log "Login OK (cookie mode, panel=${_3XUI_PANEL_VERSION})"
     return 0
 }
 
@@ -212,8 +346,14 @@ api_call() {
     local endpoint="$2"
     shift 2
 
-    [ -z "$_3XUI_COOKIE_JAR" ] && _3xui_die "Не залогинены (вызови api_login сначала)" && return 1
-    [ ! -f "$_3XUI_COOKIE_JAR" ] && _3xui_die "Cookie jar не найден ($_3XUI_COOKIE_JAR)" && return 1
+    if [ -z "$_3XUI_AUTH_MODE" ]; then
+        _3xui_die "Не залогинены (вызови api_login сначала)"
+        return 1
+    fi
+    if [ "$_3XUI_AUTH_MODE" = "cookie" ]; then
+        [ -z "$_3XUI_COOKIE_JAR" ] && _3xui_die "Cookie jar пуст" && return 1
+        [ ! -f "$_3XUI_COOKIE_JAR" ] && _3xui_die "Cookie jar не найден ($_3XUI_COOKIE_JAR)" && return 1
+    fi
 
     local json_body=""
     local form_args=()
@@ -233,6 +373,7 @@ api_call() {
     local delay=1
     local response=""
     local http_code=""
+    local csrf_retry_done=0
 
     while [ "$attempt" -lt "$max_attempts" ]; do
         attempt=$((attempt + 1))
@@ -240,10 +381,22 @@ api_call() {
         local curl_args=(
             -sS
             --max-time "$_3XUI_DEFAULT_TIMEOUT"
-            -b "$_3XUI_COOKIE_JAR"
             -X "$method"
             -w "\n__HTTP_CODE__%{http_code}"
         )
+
+        # Аутентификация по режиму
+        if [ "$_3XUI_AUTH_MODE" = "bearer" ]; then
+            curl_args+=(-H "Authorization: Bearer ${_3XUI_BEARER_TOKEN}")
+        else
+            curl_args+=(-b "$_3XUI_COOKIE_JAR")
+            # На POST/PUT/DELETE и панели v3+ — пробрасываем CSRF, если есть.
+            # На GET-запросах CSRF не нужен. На v2.x токена нет, заголовок не отправляется.
+            if [ "$_3XUI_PANEL_VERSION" = "v3+" ] && [ -n "$_3XUI_CSRF_TOKEN" ] \
+               && [ "$method" != "GET" ]; then
+                curl_args+=(-H "x-csrf-token: ${_3XUI_CSRF_TOKEN}")
+            fi
+        fi
 
         if [ -n "$json_body" ]; then
             curl_args+=(-H "Content-Type: application/json" --data-raw "$json_body")
@@ -265,6 +418,29 @@ api_call() {
         response="$(echo "$response" | grep -v "__HTTP_CODE__")"
 
         if [ "$http_code" = "200" ]; then
+            break
+        elif [ "$http_code" = "403" ] && [ "$_3XUI_AUTH_MODE" = "cookie" ] && [ "$csrf_retry_done" -eq 0 ]; then
+            # CSRF-middleware. Обновляем токен и повторяем — без увеличения delay.
+            _3xui_log "Attempt $attempt: HTTP 403 (CSRF). Refreshing token..."
+            local csrf_resp_new
+            csrf_resp_new="$(
+                curl -sS \
+                    --max-time "$_3XUI_DEFAULT_TIMEOUT" \
+                    -c "$_3XUI_COOKIE_JAR" -b "$_3XUI_COOKIE_JAR" \
+                    "${_3XUI_BASE_URL}/csrf-token" \
+                    2>/dev/null
+            )" || csrf_resp_new=""
+            local new_csrf
+            new_csrf="$(printf '%s' "$csrf_resp_new" \
+                | jq -r '.token // .csrfToken // .obj // empty' 2>/dev/null)"
+            if [ -n "$new_csrf" ]; then
+                _3XUI_CSRF_TOKEN="$new_csrf"
+                _3XUI_PANEL_VERSION="v3+"
+                csrf_retry_done=1
+                attempt=$((attempt - 1))   # этот заход не считаем за полноценную попытку
+                continue
+            fi
+            # Не смогли обновить — выходим как с обычной 4xx
             break
         elif [ "$http_code" -ge 500 ]; then
             _3xui_log "Attempt $attempt: HTTP $http_code, retrying in ${delay}s..."
@@ -327,14 +503,22 @@ api_list_inbounds() {
     api_call GET "/panel/api/inbounds/list"
 }
 
-# api_logout — очистка cookie и состояния
+# api_logout — очистка cookie/токена и состояния
 api_logout() {
-    if [ -n "$_3XUI_COOKIE_JAR" ] && [ -f "$_3XUI_COOKIE_JAR" ]; then
-        # Best-effort: вызываем /logout если есть, потом удаляем cookie
-        curl -sS --max-time 5 -b "$_3XUI_COOKIE_JAR" -X GET "${_3XUI_BASE_URL}/logout" >/dev/null 2>&1 || true
+    if [ "$_3XUI_AUTH_MODE" = "cookie" ] && [ -n "$_3XUI_COOKIE_JAR" ] && [ -f "$_3XUI_COOKIE_JAR" ]; then
+        # Best-effort: вызываем /logout если есть, потом удаляем cookie.
+        # На v3+ /logout сам требует CSRF — пробрасываем заголовок если есть.
+        local logout_args=(-sS --max-time 5 -b "$_3XUI_COOKIE_JAR" -X GET)
+        [ -n "$_3XUI_CSRF_TOKEN" ] && logout_args+=(-H "x-csrf-token: ${_3XUI_CSRF_TOKEN}")
+        logout_args+=("${_3XUI_BASE_URL}/logout")
+        curl "${logout_args[@]}" >/dev/null 2>&1 || true
         rm -f "$_3XUI_COOKIE_JAR"
     fi
     _3XUI_COOKIE_JAR=""
+    _3XUI_BEARER_TOKEN=""
+    _3XUI_CSRF_TOKEN=""
+    _3XUI_AUTH_MODE=""
+    _3XUI_PANEL_VERSION=""
     _3xui_log "Logout OK"
     trap - EXIT INT TERM
 }
