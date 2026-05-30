@@ -48,6 +48,7 @@ _3XUI_PORT=""
 _3XUI_WEB_PATH=""
 _3XUI_BASE_URL=""
 _3XUI_COOKIE_JAR=""
+_3XUI_CSRF_TOKEN=""   # CSRF-токен (3X-UI v3.x); пустой на старых версиях
 _3XUI_DEFAULT_TIMEOUT=10
 _3XUI_DEFAULT_RETRIES=3
 _3XUI_MASS_PAUSE_MS=150   # пауза между массовыми запросами
@@ -141,6 +142,32 @@ _3xui_parse_args() {
     done
 }
 
+# Получить CSRF-токен панели (3X-UI v3.x: GET {base}/csrf-token → {obj:"<token>"}).
+# Токен нужен в заголовке X-CSRF-Token на всех небезопасных методах (POST/DELETE).
+# Best-effort: если эндпоинт отсутствует (панель < v3.0) или ответ не JSON —
+# токен остаётся пустым, и заголовок X-CSRF-Token не добавляется (обратная
+# совместимость со старыми панелями). Требует уже созданный cookie jar.
+_3xui_fetch_csrf() {
+    [ -z "$_3XUI_BASE_URL" ] && return 0
+    [ -z "$_3XUI_COOKIE_JAR" ] && return 0
+
+    local resp token
+    resp="$(
+        curl -sS \
+            --max-time "$_3XUI_DEFAULT_TIMEOUT" \
+            -c "$_3XUI_COOKIE_JAR" -b "$_3XUI_COOKIE_JAR" \
+            -H "X-Requested-With: XMLHttpRequest" \
+            "${_3XUI_BASE_URL}/csrf-token" 2>/dev/null
+    )" || return 0
+
+    token="$(echo "$resp" | jq -r '.obj // empty' 2>/dev/null)"
+    if [ -n "$token" ] && [ "$token" != "null" ]; then
+        _3XUI_CSRF_TOKEN="$token"
+        _3xui_log "CSRF-токен получен (len=${#token})"
+    fi
+    return 0
+}
+
 # ─── Публичный API ────────────────────────────────────────────────────────────
 
 # api_login --domain X --port N --web-path P --admin U --password-ref REF
@@ -177,15 +204,24 @@ api_login() {
     # Cleanup при завершении (защита cookie с токеном)
     trap 'api_logout 2>/dev/null || true' EXIT INT TERM
 
+    # CSRF-токен (3X-UI v3.x). Тянем до логина; на старых панелях останется пустым.
+    _3xui_fetch_csrf
+
     _3xui_log "Login → ${_3XUI_BASE_URL}/login (admin=$admin)"
+
+    # Заголовки: X-Requested-With всегда; X-CSRF-Token — только если токен получен.
+    local login_headers=(-H "X-Requested-With: XMLHttpRequest")
+    [ -n "$_3XUI_CSRF_TOKEN" ] && login_headers+=(-H "X-CSRF-Token: $_3XUI_CSRF_TOKEN")
 
     local response
     response="$(
         curl -sS \
             --max-time "$_3XUI_DEFAULT_TIMEOUT" \
-            -c "$_3XUI_COOKIE_JAR" \
+            -c "$_3XUI_COOKIE_JAR" -b "$_3XUI_COOKIE_JAR" \
+            "${login_headers[@]}" \
             -X POST "${_3XUI_BASE_URL}/login" \
-            -d "username=${admin}&password=${password}" \
+            --data-urlencode "username=${admin}" \
+            --data-urlencode "password=${password}" \
             2>&1
     )" || {
         _3xui_die "Login: curl failed: $response"
@@ -233,6 +269,7 @@ api_call() {
     local delay=1
     local response=""
     local http_code=""
+    local csrf_retried=0   # одноразовый повтор с обновлённым CSRF-токеном при 403
 
     while [ "$attempt" -lt "$max_attempts" ]; do
         attempt=$((attempt + 1))
@@ -241,9 +278,12 @@ api_call() {
             -sS
             --max-time "$_3XUI_DEFAULT_TIMEOUT"
             -b "$_3XUI_COOKIE_JAR"
+            -H "X-Requested-With: XMLHttpRequest"
             -X "$method"
             -w "\n__HTTP_CODE__%{http_code}"
         )
+        # X-CSRF-Token (3X-UI v3.x) — только если токен получен на логине.
+        [ -n "$_3XUI_CSRF_TOKEN" ] && curl_args+=(-H "X-CSRF-Token: $_3XUI_CSRF_TOKEN")
 
         if [ -n "$json_body" ]; then
             curl_args+=(-H "Content-Type: application/json" --data-raw "$json_body")
@@ -266,6 +306,12 @@ api_call() {
 
         if [ "$http_code" = "200" ]; then
             break
+        elif [ "$http_code" = "403" ] && [ "$csrf_retried" -eq 0 ]; then
+            # CSRF-токен протух/отсутствует — обновляем и повторяем один раз.
+            csrf_retried=1
+            _3xui_log "Attempt $attempt: HTTP 403 — обновляю CSRF-токен и повторяю"
+            _3xui_fetch_csrf
+            continue
         elif [ "$http_code" -ge 500 ]; then
             _3xui_log "Attempt $attempt: HTTP $http_code, retrying in ${delay}s..."
             sleep "$delay"
