@@ -208,10 +208,14 @@ ensure_local_env() {
     LOCAL_ENV_PM="$(_detect_pkg_manager)"
     LOCAL_ENV_JQ="$(command -v jq 2>/dev/null || true)"
 
-    # 1. bash. Если дошли сюда — bash есть (скрипт исполняется в нём). Ветка на случай
-    #    явной диагностики; реальный отказ «нет bash» происходит ДО запуска этого файла.
-    if [ -z "${BASH_VERSION:-}" ]; then
-        echo "ERROR: нужен bash, а оболочка другая." >&2
+    # 1. bash. Проверяем НАЛИЧИЕ bash как инструмента в системе, а не текущую оболочку.
+    #    Важно: Claude Code на macOS исполняет bash-блоки через zsh (дефолтная оболочка),
+    #    и `source` этого файла идёт в zsh — там $BASH_VERSION пуст. Проверять $BASH_VERSION
+    #    нельзя: на Mac/Linux она ложно срабатывает в zsh, а на нативном Windows скрипт и
+    #    так не стартует. Реальное требование — bash доступен для `bash script.sh`-вызовов
+    #    (detect-defaults.sh, validate-config.sh и пр.).
+    if ! command -v bash >/dev/null 2>&1; then
+        echo "ERROR: нужен bash, а в системе его нет." >&2
         _bash_manual_hint
         return 1
     fi
