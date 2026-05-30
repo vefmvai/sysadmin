@@ -60,8 +60,9 @@ self_test_setup() {
     # helper: дописать проблему в список (bash не умеет local-функции, поэтому через переменную)
     _stp_add() { problems="${problems}  • $1"$'\n'; }
 
-    # 1. bash + jq
-    [ -n "${BASH_VERSION:-}" ] || _stp_add "Нет bash (оболочка не bash — нужен Git Bash на Windows)."
+    # 1. bash + jq. Проверяем НАЛИЧИЕ bash в системе, а не текущую оболочку: Claude Code
+    #    на macOS исполняет блоки через zsh, где $BASH_VERSION пуст (это не значит «нет bash»).
+    command -v bash >/dev/null 2>&1 || _stp_add "Нет bash в системе (на Windows нужен Git Bash)."
     if command -v jq >/dev/null 2>&1; then :; else
         _stp_add "Утилита jq недоступна — без неё конфиг не читается. Установка jq не удалась."
     fi
