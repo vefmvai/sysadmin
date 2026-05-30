@@ -533,6 +533,19 @@ source "$LIB/self-test-setup.sh"
 if self_test_setup "$CONFIG_PATH" "$SYSADMIN_ROOT"; then
     echo ""
     echo "Готово. Конфиг записан и полностью проверен: $CONFIG_PATH"
+
+    # --- Активация версионируемого pre-commit hook репо sysadmin ----------
+    # Хук .githooks/pre-commit блокирует коммит при рассинхроне персоны
+    # (выжимка sysadmin.md ↔ references/). Он версионируется в репо, но
+    # core.hooksPath нужно включить ОДИН раз на машине — делаем это здесь,
+    # идемпотентно. Не валим init, если что-то не так с git (опциональная фича).
+    if [ -d "$SYSADMIN_ROOT/.git" ] && [ -f "$SYSADMIN_ROOT/.githooks/pre-commit" ]; then
+        if [ "$(git -C "$SYSADMIN_ROOT" config core.hooksPath 2>/dev/null)" != ".githooks" ]; then
+            git -C "$SYSADMIN_ROOT" config core.hooksPath .githooks 2>/dev/null \
+                && echo "→ pre-commit hook активирован (core.hooksPath=.githooks): защита персоны от рассинхрона." \
+                || echo "⚠️  не удалось включить core.hooksPath — пропускаю (необязательная фича)."
+        fi
+    fi
     # дальше — Шаг 11 (подсказки по следующим шагам)
 else
     # self_test_setup уже напечатал честный вердикт с инструкцией «свяжись с разработчиком».
