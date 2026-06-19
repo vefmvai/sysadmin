@@ -17,6 +17,7 @@
 #   meta.* (онбоардинг)                      → agent-config.meta
 #   infrastructure.root_path                 → agent-config.projects[0].infra_root
 #   monitoring/backups/notifications/servers/vpn/map → infra-config.*
+#   backups.retention "Nd-Nw-Nm" (legacy-строка) → объект {daily,weekly,monthly} (новая схема)
 #
 # Возврат: 0 — оба draft'а собраны; 1 — ошибка (нет аргументов / нет jq / битый legacy).
 
@@ -83,7 +84,19 @@ jq '
   }
   + (if .map then {map: .map} else {} end)
   + { monitoring: (.monitoring // {enabled:false}) }
-  + { backups: (.backups // {enabled:false}) }
+  + { backups: (
+      # retention в legacy — строка "Nd-Nw-Nm"; новая схема требует объект {daily,weekly,monthly}.
+      (.backups // {enabled:false}) as $b
+      | if (($b.retention?) | type) == "string" then
+          ($b.retention) as $s
+          | if ($s | test("^[0-9]+d-[0-9]+w-[0-9]+m$")) then
+              ($s | capture("(?<d>[0-9]+)d-(?<w>[0-9]+)w-(?<m>[0-9]+)m")) as $r
+              | $b + {retention: {daily:($r.d|tonumber), weekly:($r.w|tonumber), monthly:($r.m|tonumber)}}
+            else
+              $b + {retention: {daily:7, weekly:4, monthly:6}}
+            end
+        else $b end
+    ) }
   + { notifications: (.notifications // {telegram:{enabled:false}}) }
   + { servers: (.servers // []) }
   + (if .vpn then {vpn: .vpn} else {} end)
