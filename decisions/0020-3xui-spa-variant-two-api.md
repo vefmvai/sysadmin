@@ -49,6 +49,19 @@ SPA-сборку (`getXrayConfig` → 404 при живом `server/getConfigJso
 - ⚠️ Зафиксировано неприятное: «заявленная версия ≠ фактический API», и fork-check по строке
   `MHSanaei/3x-ui` недостаточен — полагаться только на пробу эндпоинтов.
 
+## Обновление (2026-07-15) — реализация проверена на живой панели
+
+Живая проверка B1 на панели AIOW (3.4.2) подтвердила SPA-детект и врапперы
+`api_get_xray_config` / `api_update_xray_config` (form + strip `.inbounds`) /
+`api_restart_xray` / `api_add_client`. Реверс JS-бандла (`useClients-*.js`) + проба на живой
+панели уточнили клиентскую модель: **удаление по EMAIL** (`clients/del/{email}`, не uuid/не
+числовой id), `.obj.settings` из `inbounds/get` на SPA — **объект** (не строка), UUID нового
+клиента генерит панель. В хелпер добавлены `api_del_client` (email), `api_get_inbound`,
+`api_get_client_uuid`, схема `keepassxc`, fail-closed strip; скрипты
+`configure-vpn-routing` (`add-clients`/`setup-routing`/`add-outbound`) переведены на врапперы.
+Осталось подтвердить на живой панели `api_add_inbound` (SPA `inbounds/add` form) и
+`create-vless-inbound.sh`. Детали — `_reference/3x-ui-api.md` §15 (`last_researched: 2026-07-15`).
+
 ## Связанное
 
 - Связан с ADR-0005 (архитектура VPN), ADR-0006 (слои VPN-knowledge).
