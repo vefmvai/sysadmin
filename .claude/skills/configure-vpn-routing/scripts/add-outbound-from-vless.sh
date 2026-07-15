@@ -3,7 +3,9 @@
 # vless://-ссылки (либо от провайдера, либо со своего загр.VPS).
 #
 # Особенность: outbounds в 3X-UI не имеют отдельного API-эндпоинта.
-# Работа идёт через getXrayConfig → modify → updateXrayConfig.
+# Работа идёт через врапперы api_get_xray_config → modify → api_update_xray_config
+# (variant-aware: SPA server/getConfigJson + xray/update-form, legacy inbounds/*XrayConfig).
+# Новый outbound добавляется в КОНЕЦ массива — дефолтный outbound (первый) не смещается.
 #
 # Вход через ENV:
 #   PANEL_DOMAIN, PANEL_PORT, WEB_BASE_PATH, ADMIN_LOGIN, PASSWORD_REF
@@ -61,8 +63,9 @@ api_login \
     --admin "$ADMIN_LOGIN" \
     --password-ref "$PASSWORD_REF"
 
-# Получаем текущий xray-конфиг
-CURRENT_CONFIG_RESPONSE="$(api_call GET "/panel/api/inbounds/getXrayConfig")"
+# Получаем текущий xray-конфиг (variant-aware враппер: SPA server/getConfigJson vs legacy
+# inbounds/getXrayConfig; оба кладут конфиг в .obj).
+CURRENT_CONFIG_RESPONSE="$(api_get_xray_config)"
 CURRENT_CONFIG="$(echo "$CURRENT_CONFIG_RESPONSE" | jq '.obj')"
 
 # Формируем streamSettings под security
@@ -139,7 +142,7 @@ echo "[outbound] Добавляю outbound: tag=$FINAL_TAG host=$HOST port=$PORT
 api_update_xray_config "$NEW_CONFIG" >&2
 
 # Verify
-VERIFY="$(api_call GET "/panel/api/inbounds/getXrayConfig" | jq -r --arg tag "$FINAL_TAG" '.obj.outbounds[] | select(.tag == $tag) | .tag')"
+VERIFY="$(api_get_xray_config | jq -r --arg tag "$FINAL_TAG" '.obj.outbounds[] | select(.tag == $tag) | .tag')"
 
 if [ "$VERIFY" != "$FINAL_TAG" ]; then
     echo "ERROR: верификация: outbound с tag=$FINAL_TAG не найден после обновления" >&2

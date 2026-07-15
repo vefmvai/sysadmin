@@ -148,8 +148,9 @@ api_login \
     --admin "$ADMIN_LOGIN" \
     --password-ref "$PASSWORD_REF"
 
-# Текущий конфиг
-CURRENT_CONFIG="$(api_call GET "/panel/api/inbounds/getXrayConfig" | jq '.obj')"
+# Текущий конфиг (variant-aware: SPA server/getConfigJson vs legacy inbounds/getXrayConfig;
+# оба кладут конфиг в .obj, поэтому распаковка одинакова).
+CURRENT_CONFIG="$(api_get_xray_config | jq '.obj')"
 
 # Определяем INBOUND_TAGS — все vless inbounds, если не передано
 if [ -z "${INBOUND_TAGS_JSON:-}" ]; then

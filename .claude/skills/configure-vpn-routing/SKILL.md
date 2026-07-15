@@ -198,13 +198,20 @@ fi
 и `SERVER_ALIAS`:
 
 ```
-keychain → "keychain:3xui-panel-${SERVER_ALIAS}"
-pass     → "pass:3xui-panel-${SERVER_ALIAS}"
-bw       → "bw:3xui-panel-${SERVER_ALIAS}"
-op       → "op:Private/3xui-panel-${SERVER_ALIAS}/password"
+keychain  → "keychain:3xui-panel-${SERVER_ALIAS}"
+pass      → "pass:3xui-panel-${SERVER_ALIAS}"
+bw        → "bw:3xui-panel-${SERVER_ALIAS}"
+op        → "op:Private/3xui-panel-${SERVER_ALIAS}/password"
+keepassxc → "keepassxc:3xui-panel-${SERVER_ALIAS}"
 ```
 
 Login через `api_login` — пароль читается из менеджера автоматически.
+
+> **KeePassXC:** ссылка `keepassxc:<заголовок записи>` требует ENV `KEEPASSXC_DB`
+> (путь к `.kdbx`) и `KEEPASSXC_PASSWORD` (мастер-пароль, подаётся `keepassxc-cli` по
+> stdin); опционально `KEEPASSXC_KEYFILE`. Мастер-пароль в git/inventory не пишется —
+> оператор подаёт его в сессии (как прямую передачу секрета, C.10). Значения web-base-path
+> и логин панели тоже лежат записью `3xui-panel-${SERVER_ALIAS}` в KeePassXC.
 
 ## Шаг 4: Inbound (если требуется)
 

@@ -2,9 +2,11 @@
 # add-clients.sh — массовое добавление клиентов к существующему inbound.
 #
 # Поведение:
-#  - Для каждого client_email из CLIENT_NAMES_JSON генерирует UUID и добавляет
-#    к inbound через POST /panel/api/inbounds/addClient.
-#  - Пауза 150ms между запросами (защита от SQLite locking, см. 3x-ui-api.md §12.1).
+#  - Для каждого client_email из CLIENT_NAMES_JSON добавляет клиента к inbound через
+#    variant-aware враппер api_add_client (SPA: clients/add — UUID генерит ПАНЕЛЬ;
+#    legacy: inbounds/addClient). Реальный UUID забирается перечитыванием входа по email
+#    (api_get_client_uuid) — единый достоверный путь для обоих вариантов.
+#  - Пауза между запросами — внутри api_call (защита от SQLite locking, см. 3x-ui-api.md §12.1).
 #  - При ошибке на одном клиенте — продолжает с следующим, фиксирует в отчёте.
 #
 # Вход через ENV:
@@ -40,48 +42,32 @@ api_login \
     --admin "$ADMIN_LOGIN" \
     --password-ref "$PASSWORD_REF"
 
-# Получаем flow из существующего inbound (чтобы новые клиенты имели тот же flow)
-INBOUND_INFO="$(api_call GET "/panel/api/inbounds/get/${INBOUND_ID}")"
-INBOUND_FLOW="$(echo "$INBOUND_INFO" | jq -r '.obj.settings | fromjson | .clients[0].flow // ""')"
+# Получаем flow из существующего inbound (чтобы новые клиенты имели тот же flow).
+# settings на SPA — объект, на legacy — строка → нормализуем перед разбором (иначе fromjson падает).
+INBOUND_INFO="$(api_get_inbound "$INBOUND_ID")"
+INBOUND_FLOW="$(echo "$INBOUND_INFO" | jq -r '(.obj.settings | if type=="string" then fromjson else . end).clients[0].flow // ""')"
 
 RESULTS="[]"
 # Парсим имена и итерируем
 while IFS= read -r email; do
     [ -z "$email" ] && continue
 
-    UUID="$(api_gen_uuid)"
-
-    # JSON для addClient: settings.clients = [новый клиент]
-    CLIENT_SETTINGS="$(jq -nc \
-        --arg uuid "$UUID" \
-        --arg email "$email" \
-        --arg flow "$INBOUND_FLOW" \
-        '{
-            clients: [{
-                id: $uuid,
-                flow: $flow,
-                email: $email,
-                limitIp: 0,
-                totalGB: 0,
-                expiryTime: 0,
-                enable: true,
-                tgId: "",
-                subId: "",
-                reset: 0
-            }]
-        }')"
-
-    ADD_BODY="$(jq -nc \
-        --argjson id "$INBOUND_ID" \
-        --arg settings "$CLIENT_SETTINGS" \
-        '{id: $id, settings: $settings}')"
-
-    if api_call POST "/panel/api/inbounds/addClient" --json-body "$ADD_BODY" >/dev/null 2>&1; then
-        ADDED="true"
-        echo "[add-clients] ✓ $email (UUID=$UUID)" >&2
+    # Добавляем через variant-aware враппер. Свой UUID НЕ генерим: на SPA его назначает
+    # панель (переданный игнорируется). Реальный UUID на обоих вариантах забираем
+    # перечитыванием входа по email — это единственный достоверный источник на SPA.
+    if api_add_client "$INBOUND_ID" "$email" "$INBOUND_FLOW" >/dev/null 2>&1; then
+        UUID="$(api_get_client_uuid "$INBOUND_ID" "$email")"
+        if [ -n "$UUID" ] && [ "$UUID" != "null" ]; then
+            ADDED="true"
+            echo "[add-clients] ✓ $email (UUID=$UUID)" >&2
+        else
+            ADDED="false"
+            echo "[add-clients] ⚠ $email — добавлен, но UUID не прочитался (проверь панель)" >&2
+        fi
     else
+        UUID=""
         ADDED="false"
-        echo "[add-clients] ✗ $email — ошибка API" >&2
+        echo "[add-clients] ✗ $email — ошибка API при добавлении" >&2
     fi
 
     # Накапливаем в результат
@@ -94,7 +80,10 @@ while IFS= read -r email; do
             uuid: $uuid,
             added: ($added == "true")
         }]')"
-done < <(echo "$CLIENT_NAMES_JSON" | jq -r '.[]')
+done < <(echo "$CLIENT_NAMES_JSON" | jq -r '.[]' | tr -d '\r')
+# tr -d '\r': Windows-сборка jq выдаёт CRLF, и `read` иначе тащит \r в email
+# (клиент с "papa\r" не добавляется / не находится по email). Скилл запускается и на
+# Windows Git Bash оператора — стрипаем \r у источника.
 
 api_restart_xray >&2
 

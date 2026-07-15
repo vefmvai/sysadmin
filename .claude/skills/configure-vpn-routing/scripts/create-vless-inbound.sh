@@ -86,9 +86,14 @@ api_login \
     --admin "$ADMIN_LOGIN" \
     --password-ref "$PASSWORD_REF"
 
-# Генерация UUID для первого клиента
-CLIENT_UUID="$(api_gen_uuid)"
+# UUID первого клиента: на SPA его генерит ПАНЕЛЬ (клиента заводим отдельно после создания
+# входа — он email-ключевая сущность), на legacy — генерим свой и встраиваем в settings.clients.
 CLIENT_EMAIL="${CLIENT_EMAIL:-admin}"
+if [ "$_3XUI_API_VARIANT" = "spa" ]; then
+    CLIENT_UUID=""
+else
+    CLIENT_UUID="$(api_gen_uuid)"
+fi
 
 # Подготовка settings и streamSettings в зависимости от протокола
 case "$INBOUND_PROTOCOL" in
@@ -208,13 +213,22 @@ INBOUND_JSON="$(jq -nc \
         sniffing: $sniffing
     }')"
 
-echo "[inbound] Создаю inbound: remark=$INBOUND_REMARK port=$INBOUND_LISTEN_PORT protocol=$INBOUND_PROTOCOL" >&2
+echo "[inbound] Создаю inbound: remark=$INBOUND_REMARK port=$INBOUND_LISTEN_PORT protocol=$INBOUND_PROTOCOL (variant=${_3XUI_API_VARIANT:-?})" >&2
 
-# Создание через API
-RESULT="$(api_call POST "/panel/api/inbounds/add" --json-body "$INBOUND_JSON")"
+# На SPA клиент — отдельная email-ключевая сущность: в inbounds/add клиентов НЕ встраиваем
+# (settings.clients=[]), первого заводим отдельно через api_add_client после создания входа.
+CREATE_JSON="$INBOUND_JSON"
+if [ "$_3XUI_API_VARIANT" = "spa" ]; then
+    CREATE_JSON="$(echo "$INBOUND_JSON" | jq '.settings |= (fromjson | .clients=[] | tojson)')"
+fi
 
-# Извлекаем ID нового inbound
+# Создание через variant-aware враппер (SPA form-тело / legacy JSON-тело)
+RESULT="$(api_add_inbound "$CREATE_JSON")"
+
+# ID и РЕАЛЬНЫЙ tag назначает панель (формат in-<port>-<network>) — берём из ответа, не выдумываем.
 INBOUND_ID="$(echo "$RESULT" | jq -r '.obj.id // empty')"
+REAL_TAG="$(echo "$RESULT" | jq -r '.obj.tag // empty')"
+[ -n "$REAL_TAG" ] && [ "$REAL_TAG" != "null" ] && INBOUND_TAG="$REAL_TAG"
 
 if [ -z "$INBOUND_ID" ]; then
     echo "ERROR: не удалось извлечь inbound_id из ответа" >&2
@@ -222,8 +236,21 @@ if [ -z "$INBOUND_ID" ]; then
     exit 1
 fi
 
-# Финальная проверка — читаем inbound обратно
-VERIFY="$(api_call GET "/panel/api/inbounds/get/${INBOUND_ID}")"
+# На SPA — заводим первого клиента отдельно и забираем реальный UUID (генерит панель).
+if [ "$_3XUI_API_VARIANT" = "spa" ]; then
+    CLIENT_FLOW_EFF="$INBOUND_FLOW"
+    [ "$INBOUND_PROTOCOL" = "vless-reality" ] && [ -z "$CLIENT_FLOW_EFF" ] && CLIENT_FLOW_EFF="xtls-rprx-vision"
+    if api_add_client "$INBOUND_ID" "$CLIENT_EMAIL" "$CLIENT_FLOW_EFF" >/dev/null 2>&1; then
+        REAL_UUID="$(api_get_client_uuid "$INBOUND_ID" "$CLIENT_EMAIL")"
+        [ -n "$REAL_UUID" ] && [ "$REAL_UUID" != "null" ] && CLIENT_UUID="$REAL_UUID"
+    else
+        echo "ERROR: вход создан (id=$INBOUND_ID), но первый клиент '$CLIENT_EMAIL' не добавился" >&2
+        exit 1
+    fi
+fi
+
+# Финальная проверка — читаем inbound обратно (variant-aware враппер)
+VERIFY="$(api_get_inbound "$INBOUND_ID")"
 if [ "$(echo "$VERIFY" | jq -r '.obj.port')" != "$INBOUND_LISTEN_PORT" ]; then
     echo "ERROR: верификация: порт не совпадает (ожидался $INBOUND_LISTEN_PORT)" >&2
     exit 1
