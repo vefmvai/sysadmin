@@ -55,6 +55,7 @@ _3XUI_AUTH_MODE=""        # "" | "cookie" | "bearer"
 _3XUI_BEARER_TOKEN=""     # активный Bearer-токен (не логируется)
 _3XUI_CSRF_TOKEN=""       # активный CSRF-токен (переиспользуется на чувствительных эндпоинтах)
 _3XUI_PANEL_VERSION=""    # "legacy" (≤v2.x) | "v3+" (с CSRF) — выясняется в api_login
+_3XUI_API_VARIANT=""      # "legacy" (§1–14) | "spa" (§15) — REST-вариант, детект после логина (ADR-0020)
 
 # ─── Утилиты ──────────────────────────────────────────────────────────────────
 _3xui_die() {
@@ -190,7 +191,8 @@ api_login() {
         _3XUI_AUTH_MODE="bearer"
         _3XUI_COOKIE_JAR=""   # cookie не нужен
         trap 'api_logout 2>/dev/null || true' EXIT INT TERM
-        _3xui_log "Login OK (bearer mode)"
+        _3xui_detect_api_variant
+        _3xui_log "Login OK (bearer mode, variant=${_3XUI_API_VARIANT})"
         return 0
     fi
 
@@ -335,7 +337,8 @@ api_login() {
         return 1
     fi
 
-    _3xui_log "Login OK (cookie mode, panel=${_3XUI_PANEL_VERSION})"
+    _3xui_detect_api_variant
+    _3xui_log "Login OK (cookie mode, panel=${_3XUI_PANEL_VERSION}, variant=${_3XUI_API_VARIANT})"
     return 0
 }
 
@@ -361,6 +364,7 @@ api_call() {
         case "$1" in
             --json-body) json_body="$2"; shift 2 ;;
             --form) form_args+=("-d" "$2"); shift 2 ;;
+            --form-enc) form_args+=("--data-urlencode" "$2"); shift 2 ;;
             *) _3xui_die "Неизвестный аргумент api_call: $1"; return 1 ;;
         esac
     done
@@ -476,10 +480,30 @@ api_call() {
     return 0
 }
 
+# ─── Вариант API: legacy (§1–14) vs SPA-сборка 3.4.x+ (§15) — ADR-0020 ─────────
+# ⚠️ SPA-ветки ниже РЕВЕРС-ИНЖИНИРЕНЫ с живой панели 3.4.2 (2026-07-14) и НЕ прогнаны
+# автотестами. Проверять на реальной панели перед доверием (режим сисадмина, не /dev).
+# Legacy-путь оставлен как был.
+
+# _3xui_detect_api_variant — определить вариант панели ПОСЛЕ успешного логина.
+# Эвристика (§15.1): у SPA-сборки работает server/getConfigJson; у legacy его нет (404).
+_3xui_detect_api_variant() {
+    if api_call GET "/panel/api/server/getConfigJson" >/dev/null 2>&1; then
+        _3XUI_API_VARIANT="spa"
+    else
+        _3XUI_API_VARIANT="legacy"
+    fi
+    _3xui_log "API variant detected: ${_3XUI_API_VARIANT}"
+}
+
 # api_restart_xray — обязательный шаг после CRUD-операций
 api_restart_xray() {
-    _3xui_log "Restart Xray service"
-    api_call POST "/panel/api/inbounds/restartXrayService"
+    _3xui_log "Restart Xray service (variant=${_3XUI_API_VARIANT:-legacy})"
+    if [ "$_3XUI_API_VARIANT" = "spa" ]; then
+        api_call POST "/panel/api/server/restartXrayService"
+    else
+        api_call POST "/panel/api/inbounds/restartXrayService"
+    fi
 }
 
 # api_server_status — статус сервера/панели (для smoke-check)
@@ -489,16 +513,58 @@ api_server_status() {
 
 # api_get_xray_config — текущий xray-конфиг (для редактирования outbounds/routing)
 api_get_xray_config() {
-    api_call GET "/panel/api/inbounds/getXrayConfig"
+    if [ "$_3XUI_API_VARIANT" = "spa" ]; then
+        api_call GET "/panel/api/server/getConfigJson"
+    else
+        api_call GET "/panel/api/inbounds/getXrayConfig"
+    fi
 }
 
 # api_update_xray_config "<json>" — обновить xray-конфиг (outbounds + routing)
 api_update_xray_config() {
     local config_json="$1"
-    api_call POST "/panel/api/inbounds/updateXrayConfig" --json-body "$config_json"
+    if [ "$_3XUI_API_VARIANT" = "spa" ]; then
+        # SPA (§15.3): тело FORM (xraySetting=<json-строка> + outboundTestUrl); и ОБЯЗАТЕЛЬНО
+        # вычистить .inbounds до служебного api — иначе вход из БД дублируется в шаблоне и
+        # xray падает 'existing tag found'. Пользовательские входы придут из БД сами.
+        local stripped
+        stripped="$(printf '%s' "$config_json" | jq -c '.inbounds=[.inbounds[]?|select(.tag=="api")]' 2>/dev/null)"
+        [ -z "$stripped" ] && stripped="$config_json"
+        api_call POST "/panel/api/xray/update" \
+            --form-enc "xraySetting=${stripped}" \
+            --form-enc "outboundTestUrl=${_3XUI_OUTBOUND_TEST_URL:-https://www.google.com/gen_204}"
+    else
+        api_call POST "/panel/api/inbounds/updateXrayConfig" --json-body "$config_json"
+    fi
 }
 
-# api_list_inbounds — список inbound-ов
+# api_add_client INBOUND_ID EMAIL [FLOW] [TOTAL_GB] [EXPIRY_MS] [LIMIT_IP] [UUID]
+# Добавить клиента к входу. Модель данных разная (§15.3):
+#   SPA    → POST clients/add {client:{...},inboundIds:[id]}. UUID генерит ПАНЕЛЬ — реальный
+#            брать потом из inbounds/get/{id}, НЕ из ответа и НЕ передавать свой.
+#   legacy → POST inbounds/addClient {id, settings:"{clients:[{id:uuid,...}]}"} (UUID нужен свой).
+api_add_client() {
+    local inbound_id="$1" email="$2" flow="${3:-}" total_gb="${4:-0}" expiry="${5:-0}" limit_ip="${6:-0}" uuid="${7:-}"
+    [ -z "$inbound_id" ] && _3xui_die "api_add_client: нужен INBOUND_ID" && return 2
+    [ -z "$email" ] && _3xui_die "api_add_client: нужен EMAIL" && return 2
+    if [ "$_3XUI_API_VARIANT" = "spa" ]; then
+        local body
+        body="$(jq -nc --arg e "$email" --arg f "$flow" \
+            --argjson g "$total_gb" --argjson x "$expiry" --argjson l "$limit_ip" --argjson id "$inbound_id" \
+            '{client:({email:$e,enable:true,totalGB:$g,expiryTime:$x,limitIp:$l} + (if $f=="" then {} else {flow:$f} end)), inboundIds:[$id]}')"
+        api_call POST "/panel/api/clients/add" --json-body "$body"
+    else
+        [ -z "$uuid" ] && uuid="$(api_gen_uuid)"
+        local settings body
+        settings="$(jq -nc --arg u "$uuid" --arg e "$email" --arg f "$flow" \
+            --argjson g "$total_gb" --argjson x "$expiry" --argjson l "$limit_ip" \
+            '{clients:[{id:$u,email:$e,flow:$f,enable:true,totalGB:$g,expiryTime:$x,limitIp:$l}]}')"
+        body="$(jq -nc --argjson id "$inbound_id" --arg s "$settings" '{id:$id,settings:$s}')"
+        api_call POST "/panel/api/inbounds/addClient" --json-body "$body"
+    fi
+}
+
+# api_list_inbounds — список inbound-ов (работает на обоих вариантах)
 api_list_inbounds() {
     api_call GET "/panel/api/inbounds/list"
 }
@@ -519,6 +585,7 @@ api_logout() {
     _3XUI_CSRF_TOKEN=""
     _3XUI_AUTH_MODE=""
     _3XUI_PANEL_VERSION=""
+    _3XUI_API_VARIANT=""
     _3xui_log "Logout OK"
     trap - EXIT INT TERM
 }
