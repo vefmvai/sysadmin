@@ -14,9 +14,12 @@ sysadmin: knowledge живёт как `<домен>/{_live,_reference,_meta,_dia
      канону слоя (14/60/365, ADR-0006). Ловит файлы без frontmatter (их не видит
      check-knowledge-freshness.sh — они «невидимы» для контроля свежести).
   2. БИТЫЕ ПУТЕВЫЕ ССЫЛКИ (hard): markdown- и backtick-ссылки на .md С ПУТЁМ (содержат `/`)
-     — внутрь knowledge (`_live/…`, `_reference/…`, …) или в репо (`.claude/…`, `decisions/…`).
+     — внутрь knowledge (`_reference/…`, `_meta/…`) или в репо (`.claude/…`, `decisions/…`).
      Голые имена файлов без пути НЕ проверяются: они неоднозначны (`networks.md` —
      inventory, `sysadmin.md` — заглушка агента), проверка дала бы ложные срабатывания.
+     Ссылки на живой слой `_live/*.md` (кроме `*.example.md`) НЕ проверяются: этот слой
+     gitignored (у каждого пользователя свой, наполняется `/refresh-vpn-knowledge`) — в git
+     его нет по дизайну, отсутствие файла ≠ битая ссылка.
   3. СИРОТЫ (мягко, не влияет на код выхода): knowledge-файл, чьё имя не упомянуто ни в
      README (каталог-индекс домена), ни в одном другом knowledge-файле.
 
@@ -122,6 +125,12 @@ def resolve_ref(ref, file_path, domain_dir, repo_root):
         return None
     if "/" not in ref:          # голое имя — неоднозначно, не проверяем (см. docstring)
         return None
+    # Живой слой `_live/*.md` (кроме `*.example.md`) — gitignored (.gitignore: у каждого
+    # пользователя свой, наполняется /refresh-vpn-knowledge). В git/свежем клоне его нет, поэтому
+    # ссылки на него НЕ битые — просто не проверяем существование (файл — валиден по дизайну).
+    norm = ref.replace("\\", "/")
+    if "_live/" in norm and not norm.rsplit("/", 1)[-1].endswith(".example.md"):
+        return None
     if ref.startswith(REPO_ROOT_PREFIXES):
         return os.path.join(repo_root, ref)
     if ref.startswith(DOMAIN_DIRS):
@@ -133,6 +142,13 @@ def resolve_ref(ref, file_path, domain_dir, repo_root):
 
 
 def main():
+    # Windows-консоль по умолчанию cp1252 и падает на эмодзи (📊/✅) в выводе.
+    # Форсируем UTF-8, где поток это поддерживает (Python 3.7+).
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except (AttributeError, ValueError):
+        pass
+
     if not os.path.isdir(KNOWLEDGE_DIR):
         print(f"ОШИБКА: папка {KNOWLEDGE_DIR}/ не найдена. Запускай из корня репо.")
         return 2
