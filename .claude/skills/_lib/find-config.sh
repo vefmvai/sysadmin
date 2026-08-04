@@ -316,12 +316,17 @@ resolve_active_project() {
         return 1
     fi
 
-    # tilde → $HOME (без eval)
-    local root="${raw_root/#\~/$HOME}"
-    # нормализуем, если папка существует (схлопывает ../, относительные части)
-    local norm
-    norm="$(cd "$root" 2>/dev/null && pwd)"
-    [ -n "$norm" ] && root="$norm"
+    # Резолв — через общий канон ADR-0008: tilde → $HOME, абсолютный как есть,
+    # относительный — от КАТАЛОГА КОНФИГА (здесь — каталога мозга), а НЕ от cwd.
+    # Раньше здесь стоял свой `cd "$root" && pwd`, считавший относительный путь от
+    # рабочего каталога процесса, — и `agent-config.json` с `../infra` резолвился
+    # по-разному в разных местах: host-digest.sh и self-test-setup.sh давно шли
+    # каноном, Cold Start — нет (расхождение найдено проверкой 04.08.2026).
+    # rc игнорируем намеренно: при отсутствующей папке (First-Run) функция всё равно
+    # печатает лучший вариант пути, и вызывающий сам покажет осмысленное сообщение.
+    local root
+    root="$(resolve_infra_path "$raw_root" "$BRAIN_CONFIG")"
+    [ -z "$root" ] && root="${raw_root/#\~/$HOME}"
     ACTIVE_INFRA_ROOT="$root"
     ACTIVE_PROJECT_ID="$want_id"
 
