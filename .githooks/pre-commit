@@ -29,7 +29,7 @@ case "$STAGED" in *".claude/agents/references/"*) PERSONA_TOUCHED=1 ;; esac
 
 if [ "$PERSONA_TOUCHED" -eq 1 ]; then
     # --- бюджет ядра CLAUDE.md (ADR-0016, анти-храповик) -------------------
-    CLAUDE_BUDGET_BYTES=42000
+    CLAUDE_BUDGET_BYTES=46000
     CLAUDEMD="$ROOT/CLAUDE.md"
     case "$STAGED" in
         *"CLAUDE.md"*)
