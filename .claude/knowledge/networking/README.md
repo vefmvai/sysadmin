@@ -39,15 +39,24 @@
 | Цепочка Xray на Mac (VLESS→VLESS) для Claude Code, proxy-only без TUN | `_reference/xray-mac-chain.md` |
 | Сети Docker для нового сервиса: 4-сеть-сегментация, expose vs publish, UFW и Docker | `_reference/server-networks-defaults.md` |
 | **Симптом у пользователя:** Госуслуги и Сбер не открываются под VPN; VSCode идёт мимо VPN; нейросеть банит аккаунт; «грязный» IP; звонки рвутся; клиент ест батарею; я за границей, а РФ-сайты меня блокируют | `_reference/vpn-consultation-flow.md` §11 (FAQ) |
-| Где арендовать заграничный VPS, каких хостеров избегать; сколько это стоит; брать подписку провайдера или свой сервер | `_reference/vpn-consultation-flow.md` §9-§10 |
+| Где арендовать заграничный VPS, каких хостеров избегать, сколько стоит; брать подписку провайдера или свой сервер | `_reference/vpn-consultation-flow.md` §10 |
+| Отдельный чистый выход для нейросетей; почему скачущий IP хуже «плохой страны» | `_reference/vpn-consultation-flow.md` §9 |
 | Как вести VPN-консультацию с новичком: какие вопросы задать, эталонная архитектура | `_reference/vpn-consultation-flow.md` §1-§8 |
-| **DNS:** утечки резолвинга, DoH и DoU, российские домены мимо зарубежного резолвера | `_reference/routing-server-3xui.md` (на сервере) + `_reference/fronting-strategies.md` §8 (протоколы DNS) |
-| **Включить туннель (TUN) на телефоне или ноутбуке**, «работает только браузер» | скилл `/generate-client-config` → `.claude/skills/generate-client-config/references/platform-quirks.md` |
+| **DNS как рубеж блокировок:** зачем DoH/DoT, блокируют ли сами резолверы в РФ | `_reference/fronting-strategies.md` §8 |
+| **DNS в профиле клиента:** DoH для зарубежных и российских доменов, «маршрут ведёт в direct, а резолвинг идёт через VPN» | `_reference/happ-subscription-format.md` §8 + `_reference/client-apps.md` (поля профиля Happ) |
+| После обновления клиента конфиг не грузится: **сменился формат DNS** в ядре sing-box 1.12 | `_reference/routing-on-device-singbox.md` |
+| **Что такое TUN**, чем отличается от режима системного прокси, почему без него часть программ идёт мимо | `_reference/vpn-consultation-flow.md` §5.1-5.3 |
+| **Как включить TUN** на телефоне или ноутбуке, «работает только браузер» | скилл `/generate-client-config` → `.claude/skills/generate-client-config/references/platform-quirks.md` |
 | **«Не работает» без подробностей** — с чего начать разбор жалобы | скилл `/finalize-vpn-routing` → `.claude/skills/finalize-vpn-routing/references/complaint-triage.md` |
 | Непонятен термин (TSPU, DPI, SNI, fingerprint, fronting) | `_meta/glossary.md` |
 | Насколько доверять найденному источнику | `_meta/sources-registry.md` |
 | Два источника противоречат друг другу | `_meta/conflicts.md` |
 | Нужна картинка, как это устроено целиком | `_diagrams/vpn-architecture-reference.md` |
+
+> ⚠️ **Чего в базе нет, хотя спрашивают.** Настройки DNS **на сервере** (какой резолвер
+> подставить Xray, как развести российские и зарубежные домены по резолверам) в
+> `routing-server-3xui.md` нет — там только маршрутизация по доменам и IP. Клиентская
+> сторона DNS описана (строки выше), серверная — пробел. Не выдумывать: нет данных.
 
 **Чего здесь нет и где искать.** Это база **фактов**; пошаговые операции живут в скиллах:
 

@@ -152,7 +152,7 @@ IP сменился — TUN работает и его увидят **все** �
 |---|---|---|
 | TUN не включается на Windows | Запущено не от администратора | Правый клик → Run as administrator |
 | TUN не включается на macOS | Не дано разрешение на system extension | System Settings → Privacy & Security → Allow, затем перезагрузка |
-| TUN включён, интернет не работает | Не настроен DNS | DNS настраивается на сервере (`../../../knowledge/networking/_reference/routing-server-3xui.md`), либо в клиенте указать DoH — например `1.1.1.1` |
+| TUN включён, интернет не работает | Не настроен DNS | Указать в клиенте DoH-резолвер (например `https://1.1.1.1/dns-query`). Поля профиля Happ — `../../../knowledge/networking/_reference/client-apps.md`; расхождение «маршрут в direct, резолвинг через VPN» — `../../../knowledge/networking/_reference/happ-subscription-format.md` §8. **Серверной настройки DNS в базе знаний нет** — не искать её в `routing-server-3xui.md` |
 | TUN включён, российские сайты медленные | Нет direct-правил на сервере | `../../../knowledge/networking/_reference/routing-server-3xui.md` §4 |
 | iPhone: не включить одновременно рабочий WireGuard и VPN-клиент | iOS допускает один активный VPN-профиль | Развести оба маршрута на сервере либо держать два профиля и переключаться. Разбор — `../../../knowledge/networking/_reference/vpn-consultation-flow.md` §11.3 |
 
