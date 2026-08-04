@@ -103,7 +103,18 @@ CHANGE_RE = re.compile(
     r"|ufw\s+(allow|deny|delete|limit)"
     r"|crontab\s+"
     r"|ln\s+-s.*sites-enabled"
-    r"|(tee|sed\s+-i)\s+.*(nginx|compose|\.env|\.conf|crontab)",
+    r"|(tee|sed\s+-i)\s+.*(nginx|compose|\.env|\.conf|crontab)"
+    # Скрипты-обёртки выкатки. Ожог 2026-08-04: перечислялись только ПРЯМЫЕ команды, а
+    # весь IaC-контур устроен обёрткой — настоящие `git pull` и `docker compose up -d`
+    # живут ВНУТРИ скрипта на сервере, в ход попадает только его вызов. Класс операций,
+    # ради которых замок и ставился, проходил мимо: выкатка пересоздала контейнер, ответ
+    # закончился словами «инфраструктуру это не меняло», замок промолчал, отставание
+    # снимка заметил оператор. При этом на безобидное `crontab -l` замок срабатывал.
+    # Голого имени достаточно: read-only обёртки (`cat`, `grep`) отсеяны выше в
+    # READONLY_LEAD, а ложное срабатывание на упоминании — осознанная цена (правило 4
+    # в knowledge/agent-runtime/_reference/building-enforcement.md).
+    r"|deploy(-remote)?\.sh"
+    r"|update\.sh",
     re.IGNORECASE)
 
 INVENTORY_RE = re.compile(r"inventory[/\\]|/infra/.*\.md$|refresh\.sh|dump-snapshot", re.IGNORECASE)

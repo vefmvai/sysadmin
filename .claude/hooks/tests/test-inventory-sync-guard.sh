@@ -69,6 +69,25 @@ check block "правило firewall" "$TMP/change3.jsonl"
 mk "$TMP/change4.jsonl" "Bash:ssh bronto 'docker network create services'"
 check block "новая сеть" "$TMP/change4.jsonl"
 
+echo "[2а] Выкатка скриптом-обёрткой — тоже изменение (пропуск 2026-08-04)"
+# Ожог: весь IaC-контур устроен обёрткой — реальные `git pull` и `docker compose up`
+# живут ВНУТРИ скрипта на сервере, а в ход попадает только его вызов. Замок ловил
+# прямые команды и молчал на обёртке: выкатка пересоздала контейнер, ответ закончился
+# словами «инфраструктуру это не меняло», отставание снимка заметил оператор.
+mk "$TMP/wrap1.jsonl" "Bash:./scripts/deploy/deploy-remote.sh bronto"
+check block "деплой с ноутбука" "$TMP/wrap1.jsonl"
+mk "$TMP/wrap2.jsonl" "Bash:ssh bronto 'cd /opt/infra && ./deploy.sh'"
+check block "серверный deploy.sh" "$TMP/wrap2.jsonl"
+mk "$TMP/wrap3.jsonl" "Bash:cd ~/Projects/app && ./deploy.sh"
+check block "деплой чужого проекта" "$TMP/wrap3.jsonl"
+mk "$TMP/wrap4.jsonl" "Bash:ssh bronto 'cd /opt/apps/bot && ./update.sh'"
+check block "update.sh" "$TMP/wrap4.jsonl"
+# Граница: упоминание внутри read-only команды изменением не считается (правило 4).
+mk "$TMP/wrap5.jsonl" "Bash:grep -n 'deploy.sh' README.md"
+check pass "grep со словом deploy.sh" "$TMP/wrap5.jsonl"
+mk "$TMP/wrap6.jsonl" "Bash:cat scripts/deploy/deploy-remote.sh"
+check pass "чтение самого скрипта выкатки" "$TMP/wrap6.jsonl"
+
 echo "[3] Изменение + обновление inventory — пропускаем"
 mk "$TMP/ok1.jsonl" "Bash:ssh bronto 'docker compose up -d'" "Edit:/infra/inventory/hosts/bronto/services.md"
 check pass "правка inventory в том же ходе" "$TMP/ok1.jsonl"
