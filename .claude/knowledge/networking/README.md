@@ -28,7 +28,8 @@
 | Cloudflare-fronting, альтернативные CDN, WARP, uTLS, Reality fallback | `_reference/fronting-strategies.md` |
 | Что ставить на iPhone / Android / Mac / Windows / Linux; чего нет в RU App Store; какое ядро у клиента | `_reference/client-apps.md` |
 | Устройство панели 3X-UI: где лежат файлы, CLI `x-ui`, TLS-сертификат, как перезапустить ядро | `_reference/3x-ui-panel.md` |
-| **HTTP 403 при программном входе в панель**, CSRF-токен, Bearer, curl-вызовы API, `webBasePath` | `_reference/3x-ui-api.md` |
+| **HTTP 403 при программном входе в панель**, CSRF-токен, Bearer, `webBasePath` | `_reference/3x-ui-api.md` |
+| Управление панелью из скрипта: инбаунды, клиенты (добавить, удалить, UUID), **статистика и сброс трафика**, кто онлайн, IP-история, бэкап базы | `_reference/3x-ui-api.md` |
 | Маршрутизация **на сервере** (дефолт): split РФ / внешнее / block, синтаксис правил Xray | `_reference/routing-server-3xui.md` |
 | Маршрутизация **на устройстве** через sing-box; раскол ядра 1.11 ↔ 1.12 | `_reference/routing-on-device-singbox.md` |
 | Маршрутизация **на устройстве** через Xray в терминале (десктоп) | `_reference/routing-on-device-xray.md` |
@@ -37,7 +38,12 @@
 | Зеркалирование **чужой** платной подписки на свой сервер (обход лимита устройств) | `_reference/subscription-mirroring.md` |
 | Цепочка Xray на Mac (VLESS→VLESS) для Claude Code, proxy-only без TUN | `_reference/xray-mac-chain.md` |
 | Сети Docker для нового сервиса: 4-сеть-сегментация, expose vs publish, UFW и Docker | `_reference/server-networks-defaults.md` |
-| Как вести VPN-консультацию с новичком: интервью, выбор, TUN, FAQ, чек-лист | `_reference/vpn-consultation-flow.md` |
+| **Симптом у пользователя:** Госуслуги и Сбер не открываются под VPN; VSCode идёт мимо VPN; нейросеть банит аккаунт; «грязный» IP; звонки рвутся; клиент ест батарею; я за границей, а РФ-сайты меня блокируют | `_reference/vpn-consultation-flow.md` §11 (FAQ) |
+| Где арендовать заграничный VPS, каких хостеров избегать; сколько это стоит; брать подписку провайдера или свой сервер | `_reference/vpn-consultation-flow.md` §9-§10 |
+| Как вести VPN-консультацию с новичком: какие вопросы задать, эталонная архитектура | `_reference/vpn-consultation-flow.md` §1-§8 |
+| **DNS:** утечки резолвинга, DoH и DoU, российские домены мимо зарубежного резолвера | `_reference/routing-server-3xui.md` (на сервере) + `_reference/fronting-strategies.md` §8 (протоколы DNS) |
+| **Включить туннель (TUN) на телефоне или ноутбуке**, «работает только браузер» | скилл `/generate-client-config` → `.claude/skills/generate-client-config/references/platform-quirks.md` |
+| **«Не работает» без подробностей** — с чего начать разбор жалобы | скилл `/finalize-vpn-routing` → `.claude/skills/finalize-vpn-routing/references/complaint-triage.md` |
 | Непонятен термин (TSPU, DPI, SNI, fingerprint, fronting) | `_meta/glossary.md` |
 | Насколько доверять найденному источнику | `_meta/sources-registry.md` |
 | Два источника противоречат друг другу | `_meta/conflicts.md` |
@@ -53,7 +59,8 @@
 | Выпустить конфиг / QR для устройства | `/generate-client-config` |
 | Собрать свою мульти-кнопочную подписку Happ | `/setup-happ-subscription` |
 | Достать серверы из закрытой (HWID / зашифрованной) подписки | `/extract-subscription-servers` |
-| Доделать застрявшую настройку маршрутизации | `/finalize-vpn-routing` |
+| Доделать застрявшую настройку маршрутизации; разобрать жалобу «не работает» | `/finalize-vpn-routing` |
+| Обновить саму эту базу, когда она просрочена по TTL | `/refresh-vpn-knowledge` (порядок — §3) |
 
 ---
 
@@ -89,7 +96,7 @@
 | `3x-ui-panel.md` | Архитектура эталонной панели MHSanaei/3x-ui, файловая раскладка, CLI, TLS, грабли |
 | `3x-ui-api.md` | REST API панели 3X-UI: cheatsheet curl-команд для скиллов |
 | `client-apps.md` | Карта клиентов sing-box/xray на 6 платформах, iOS-специфика |
-| `vpn-consultation-flow.md` | Сценарий VPN-консультации (hub): interview, выбор протокола, TUN, FAQ, чек-лист |
+| `vpn-consultation-flow.md` | Сценарий VPN-консультации (hub): интервью с оператором, эталонная архитектура, выбор протокола входа, что такое TUN и чем отличается от SOCKS5, подписочная ссылка, расширения (отдельный выход для нейросетей, свой загр.VPS вместо провайдера), **FAQ по симптомам** (§11). Пошаговое включение TUN и чек-лист триажа жалобы **переехали в скиллы** — см. врезки в §5.4-5.6 и §12 |
 | `routing-server-3xui.md` | **Маршрутизация на сервере (дефолт)** — split РФ/foreign/block в 3X-UI, Xray-синтаксис |
 | `routing-on-device-singbox.md` | Маршрутизация на устройстве через sing-box (энтузиасты): раскол ядра 1.11↔1.12, клиенты |
 | `routing-on-device-xray.md` | Маршрутизация на устройстве через Xray в терминале (энтузиасты-десктоп) |
