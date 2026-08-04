@@ -29,7 +29,7 @@ privoxy (SOCKS→HTTP bridge)
     ↓ forward-socks5 → 127.0.0.1:10808
 xray (SOCKS inbound :10808)
     ↓ dialerProxy: "nur-bypass"
-NurVPN gRPC+Reality (обход WL, маскировка под ads.x5.ru)
+транзит gRPC+Reality (обход белых списков, маскировка под чужой популярный домен)
     ↓
 Blanc USA VLESS+TLS (exit IP)
     ↓
@@ -60,9 +60,9 @@ xray поддерживает произвольные chain через `sockopt
 - `socks-in` на :10808 (UDP enabled, sniffing)
 - `http-in` на :10809 (запасной)
 
-Два outbound в chain:
-- `blanc-usa` — VLESS+TLS:8443, SNI cdn2-07.vk-cdnvideo.com, `dialerProxy: "nur-bypass"`
-- `nur-bypass` — VLESS+Reality+gRPC:443, serverName ads.x5.ru
+Два outbound в chain (имена условные, значения — из подписки оператора, не отсюда):
+- выходной — VLESS+TLS:8443, SNI из подписки, `dialerProxy` указывает на транзитный
+- транзитный — VLESS+Reality+gRPC:443, `serverName` из подписки
 
 Routing: RU-домены и RU-IP → direct, остальное → blanc-usa (default first outbound).
 
@@ -174,16 +174,24 @@ xray поверх для Claude Code через chain bypass.
 
 ---
 
-## Серверы в конфиге (май 2026)
+## Серверы в конфиге
 
-Transit (NurVPN bypass, серия 5.x gRPC):
-- api.st.nurcloud.org:443, Reality, SNI: ads.x5.ru, serviceName: adsx5
+**Здесь сознательно НЕТ ни адресов, ни SNI, ни UUID.** Это репозиторий мозга агента —
+он публичный и универсальный (C.4). Конкретные серверы подписки, их SNI и клиентский
+UUID живут в приватной зоне оператора: `inventory/shared/vpn-subscriptions/`
+(в `.gitignore`) и в менеджере паролей.
 
-Exit (Blanc USA):
-- 213.171.31.2:8443 (NYC), SNI: cdn2-07.vk-cdnvideo.com
-- 82.202.140.29:8443 (LA), SNI: cdn5-19.vk-cdnvideo.com
-- 84.32.184.93:8443 (Houston), SNI: cdn1-42.vk-cdnvideo.com
-- 62.233.43.150:8443 (San Jose), SNI: cdn4-65.vk-cdnvideo.com
-- 82.202.159.156:8443 (Miami), SNI: cdn8-90.vk-cdnvideo.com
+Структура цепочки, которую надо знать для понимания документа:
 
-UUID Blanc: 8c8f0fd6-4636-465d-af60-8dc3b6bc68df (общий для всех)
+| Звено | Что это | Где взять значения |
+|---|---|---|
+| Transit | вход подписки-обходчика, Reality с чужим SNI и `serviceName` | подписка провайдера |
+| Exit | выходные узлы нужной страны, тот же клиентский UUID на всех | подписка провайдера |
+
+> **Ожог 2026-07-30.** До этой правки здесь лежали пять выходных узлов с адресом,
+> портом и SNI и **клиентский UUID подписки одной строкой**. То есть полный комплект
+> для подключения к чужой оплаченной подписке — в открытом репозитории. Заметили при
+> подготовке замка на приватные данные, а не проверкой секретов: `gitleaks` такое не
+> ловит, он знает форматы токенов известных сервисов, а «UUID рядом со словом Blanc»
+> для него обычная строка. Отсюда правило: **удаление из файла не отменяет ротацию** —
+> история публичного репозитория остаётся доступной, UUID обязан быть перевыпущен.
