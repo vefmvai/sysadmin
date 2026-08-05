@@ -93,13 +93,22 @@ fi
 #     зелёным все четыре круга, потому что проверяет существование пути, а не
 #     содержимое по ссылке.
 # ===========================================================================
-if [ "$KNOWLEDGE_TOUCHED" -eq 1 ]; then
+# Триггер шире, чем у соседней секции: маршруты ведут и в `references/` скиллов, поэтому
+# переименование файла в скилле способно убить маршрут, не тронув knowledge (найдено
+# проверщиком 05.08.2026).
+ROUTES_TOUCHED=0
+case "$STAGED" in *".claude/knowledge/"*) ROUTES_TOUCHED=1 ;; esac
+case "$STAGED" in *".claude/skills/"*)    ROUTES_TOUCHED=1 ;; esac
+
+if [ "$ROUTES_TOUCHED" -eq 1 ]; then
     ROUTELINT="$ROOT/scripts/check-route-targets.sh"
     if [ ! -f "$ROUTELINT" ]; then
-        echo "⚠️  pre-commit: knowledge меняется, но линтер маршрутов не найден ($ROUTELINT) — пропускаю." >&2
+        echo "⚠️  pre-commit: маршруты меняются, но линтер не найден ($ROUTELINT) — пропускаю." >&2
     else
-        echo "pre-commit: коммит трогает knowledge → проверяю маршруты README…" >&2
-        if ! ( cd "$ROOT" && bash "$ROUTELINT" --quiet >&2 ); then
+        echo "pre-commit: коммит трогает knowledge или скиллы → проверяю маршруты README…" >&2
+        # --staged, а НЕ рабочее дерево: иначе «git add плохой версии → правка на диске»
+        # даёт «чисто» при грязном коммите. Проверщик 05.08.2026 протащил так мёртвый §42.
+        if ! ( cd "$ROOT" && bash "$ROUTELINT" --staged --quiet >&2 ); then
             echo >&2
             echo "❌ pre-commit: маршрутизатор обещает то, чего в целевом файле нет." >&2
             echo "   Открой файл и сверь: номер раздела и словарь вопроса." >&2

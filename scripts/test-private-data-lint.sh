@@ -253,6 +253,36 @@ else
     ok "несуществующий путь даёт ненулевой код"
 fi
 
+echo "[10] Находки независимого проверщика 05.08.2026 (финальный круг)"
+
+# Длинная строка в списке R3: BSD grep падает с «out of memory» и кодом 2. Первая версия
+# считала пустой вывод доказательством чистоты и печатала «чисто» при значении в файле.
+LONG="$TMP/deny-long.list"
+python3 -c "print('x'*20000)" > "$LONG" 2>/dev/null || printf '%020000d\n' 0 > "$LONG"
+printf 'infra.example-operator.test\n' >> "$LONG"
+printf 'заходим на infra.example-operator.test\n' > "$TMP/r3-long.md"
+if PRIVATE_DATA_DENYLIST="$LONG" bash "$LINT" "$TMP/r3-long.md" >/dev/null 2>&1; then
+    bad "длинная строка в списке R3 ТИХО выключила правило — замок сказал «чисто»"
+else
+    ok "длинная строка в списке R3 не даёт молчаливого «чисто»"
+fi
+
+# MAC-адрес не должен считаться IPv6.
+printf 'интерфейс eth0, аппаратный адрес 00:1a:2b:3c:4d:5e\n' > "$TMP/mac.md"
+expect_pass "$TMP/mac.md" "MAC-адрес не принимается за IPv6"
+
+# Список R3 в Windows-формате и с хвостовыми пробелами обязан работать.
+printf 'infra.example-operator.test  \r\nmybox\r\n' > "$TMP/deny-crlf.list"
+if PRIVATE_DATA_DENYLIST="$TMP/deny-crlf.list" bash "$LINT" "$TMP/r3-hit.md" >/dev/null 2>&1; then
+    bad "список R3 в CRLF с хвостовыми пробелами не сработал"
+else
+    ok "список R3 терпим к CRLF и хвостовым пробелам"
+fi
+
+# Символ нулевой ширины внутри значения не должен прятать его.
+printf 'ключ 7f3a91c2-d4e5-4678-9abc-0123\xe2\x80\x8b456789ef разорван невидимым символом\n' > "$TMP/zwsp.md"
+expect_block "$TMP/zwsp.md" "символ нулевой ширины внутри UUID не прячет значение"
+
 echo
 echo "─────────────────────────────────────────────"
 echo "Пройдено: $PASS, провалено: $FAIL"

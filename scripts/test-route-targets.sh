@@ -127,6 +127,49 @@ expect_pass "$FIX/README.md" "не-табличная строка не разб
 printf '# фикстура\n\n| Задача | Скилл |\n|---|---|\n| Поставить панель | `/setup-vpn-panel` |\n' > "$FIX/README.md"
 expect_pass "$FIX/README.md" "таблица скиллов без путей .md не ломает замок"
 
+echo "═══ [4а] Формы, найденные независимым проверщиком 05.08.2026 ═══"
+
+mk '| XHTTP --- и mKCP через тире | `_reference/пустышка.md` |'
+expect_block "$FIX/README.md" "три дефиса в тексте вопроса НЕ выключают проверку строки"
+
+mk '| Настройка XHTTP и mKCP | _reference/пустышка.md |'
+expect_block "$FIX/README.md" "путь без обратных кавычек"
+
+mk '| Настройка XHTTP и mKCP | [пустышка](_reference/пустышка.md) |'
+expect_block "$FIX/README.md" "путь markdown-ссылкой"
+
+mk '| Настройка XHTTP и mKCP | `_reference/пустышка.md#якорь` |'
+expect_block "$FIX/README.md" "путь с якорем #section"
+
+mk '| Смотри `_reference/routing-server-3xui.md`, но нужен XHTTP | `_reference/пустышка.md` |'
+expect_block "$FIX/README.md" "упоминание пути в тексте вопроса не выдаёт строку за каталог"
+
+printf '# фикстура\n\n| Файл | Что внутри |\n|:---:|:---|\n| `_reference/пустышка.md` | описание XHTTP |\n' > "$FIX/README.md"
+expect_pass "$FIX/README.md" "разделитель с выравниванием и строка каталога — по-прежнему не маршрут"
+
+echo "═══ [4б] Режим --staged: хук обязан читать индекс, а не диск ═══"
+
+SB="$TMP/sandbox"
+mkdir -p "$SB/.claude/knowledge/net/_reference"
+( cd "$SB" && git init -q . && git config user.email t@t && git config user.name t ) >/dev/null 2>&1
+printf 'x\n' > "$SB/.claude/knowledge/net/_reference/пустышка.md"
+printf '# ф\n\n| Вопрос | Открыть |\n|---|---|\n| Настройка XHTTP и mKCP | `_reference/пустышка.md` |\n' \
+    > "$SB/.claude/knowledge/net/README.md"
+( cd "$SB" && git add -A ) >/dev/null 2>&1
+# в индексе — плохая версия, на диске — исправленная
+printf '# ф\n\n| Вопрос | Открыть |\n|---|---|\n| Обычный русский вопрос | `_reference/пустышка.md` |\n' \
+    > "$SB/.claude/knowledge/net/README.md"
+if ( cd "$SB" && bash "$LINT" --staged >/dev/null 2>&1 ); then
+    bad "--staged ПРОПУСТИЛ плохую версию из индекса (читает диск, а не индекс)"
+else
+    ok "--staged видит плохую версию из индекса, хотя на диске она исправлена"
+fi
+if ( cd "$SB" && bash "$LINT" >/dev/null 2>&1 ); then
+    ok "без --staged та же проверка читает диск и проходит — режимы различаются"
+else
+    bad "без --staged проверка тоже падает: режимы не различаются, тест ничего не доказывает"
+fi
+
 echo "═══ [5] Границы и отказы ═══"
 
 printf '' > "$FIX/README.md"
