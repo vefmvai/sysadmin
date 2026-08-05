@@ -899,7 +899,7 @@ legacy-формата через `/sysadmin-init` не ломают сущест
 3X-UI. С релиза панели v3.0.0 (начало 05.2026) в неё добавлен CSRF middleware:
 голый POST на `/login` с username/password — как делал наш `scripts/lib-api/3xui.sh`
 со старта VPN-блока — отбивается HTTP 403 с пустым телом. Ученик 5-го модуля
-(Полякова) на свежей панели v3.1.0 это вскрыл, исключив все ложные причины
+на свежей панели v3.1.0 это вскрыл, исключив все ложные причины
 (form vs JSON, заголовки User-Agent/Origin/Referer/X-Requested-With,
 nginx vs loopback — везде 403, рубит именно CSRF). До этого фикса
 `/setup-vpn-panel`, `/configure-vpn-routing`, `/setup-server-proxy`,
