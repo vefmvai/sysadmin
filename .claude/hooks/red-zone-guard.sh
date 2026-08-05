@@ -54,8 +54,13 @@ RED_PATTERNS=(
 
 # Исключения: временные каталоги — снос там обратим по смыслу и не трогает прод.
 SAFE_RM_RE='rm[[:space:]]+-[a-zA-Z]+[[:space:]]+("?(/private)?/(tmp|var/tmp)/|"?\$?\{?TMPDIR)'
-# Боевые каталоги: встретился ЛЮБОЙ — исключение не действует (кейс `rm -rf /tmp/x /opt/prod`).
-PROD_PATH_RE='(/opt|/etc|/var/lib|/var/www|/home|/root|/srv|/data|/usr)'
+# Боевые каталоги: встретился в ТОМ ЖЕ сегменте — исключение не действует
+# (кейс `rm -rf /tmp/x /opt/prod`). Проверяется посегментно, см. цикл ниже.
+#
+# Начало пути обязано быть настоящим началом: перед ним не буква, не цифра, не дефис и не
+# подчёркивание. Без этой границы `/tmp/data-dump` читался как боевой `/data`, а `/tmp/../opt`
+# — наоборот, проскакивал бы, если бы границу задали только пробелом и кавычкой.
+PROD_PATH_RE='(^|[^a-zA-Z0-9_-])(/opt|/etc|/var/lib|/var/www|/home|/root|/srv|/data|/usr)'
 
 # ── Извлечение команды из stdin ───────────────────────────────────────────────
 # python3 → jq → грубый фолбэк по сырому тексту (Windows без jq — реальный кейс).
@@ -137,20 +142,25 @@ while IFS= read -r seg; do
     printf '%s' "$probe" | grep -Eq "$READONLY_LEAD" && continue   # чтение — не красная зона
     printf '%s' "$probe" | grep -Eq "$SAFE_GIT_LEAD" && continue   # git-текст, не операция
     for re in "${RED_PATTERNS[@]}"; do
-        if printf '%s' "$probe" | grep -Eq "$re"; then HIT="$re"; break 2; fi
+        if printf '%s' "$probe" | grep -Eq "$re"; then
+            # Исключение «уборка временного» действует В ГРАНИЦАХ ЭТОГО СЕГМЕНТА, не всей
+            # строки. Раньше оно проверялось глобально и стоило двух ошибок сразу:
+            #   ложный блок — `ls /opt/apps; rm -rf /tmp/x` рвался из-за чтения по соседству;
+            #   ложный пропуск — `rm -rf /tmp/x && docker volume rm pgdata` проходил ЦЕЛИКОМ,
+            #   потому что первый же сегмент объявлял безопасной всю команду.
+            # Прощается только сам сегмент; остальные проверяются дальше как обычно.
+            if printf '%s' "$probe" | grep -Eq "$SAFE_RM_RE" \
+               && ! printf '%s' "$probe" | grep -Eq "$PROD_PATH_RE"; then
+                continue 2
+            fi
+            HIT="$re"; break 2
+        fi
     done
 done <<EOF
 $(printf '%s' "$LOWER" | sed -E 's/(\|\||&&|;|\||\n)/\n/g')
 EOF
 
 [ -z "$HIT" ] && exit 0
-
-# rm -rf строго во временных каталогах — не красная зона.
-# Условие строгое: команда начинается с rm по временному пути И нигде в ней не упомянут
-# боевой каталог (иначе `rm -rf /tmp/x /opt/prod` проскочил бы по первому аргументу).
-if printf '%s' "$LOWER" | grep -Eq "$SAFE_RM_RE" && ! printf '%s' "$LOWER" | grep -Eq "$PROD_PATH_RE"; then
-  exit 0
-fi
 
 # ── Ищем подтверждение оператора в транскрипте сессии ─────────────────────────
 SESSION_ID="$(json_get session_id || true)"

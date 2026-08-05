@@ -90,6 +90,26 @@ check deny  "коммит + опасная команда в цепочке" 'gi
 check deny  "git push --force не маскируется"    'git push --force origin main'
 check deny  "git reset --hard не маскируется"    'git reset --hard HEAD~3'
 
+echo "[1б] Исключение для временных каталогов действует В ГРАНИЦАХ СЕГМЕНТА"
+# Отчёт пользователя агента (2026-08-05, версия 2.7.2, случай A): исключение снималось,
+# если боевой путь встречался ГДЕ УГОДНО в команде — даже в соседнем read-only сегменте,
+# который ничего не удаляет. Диагностика боевого каталога вместе с уборкой своего /tmp
+# в одном вызове роняла весь вызов целиком.
+check allow "чтение /opt + уборка /tmp в одном вызове" 'ssh host "find /opt/apps/site -type f | wc -l; rm -rf /tmp/rf-check.abc"'
+check allow "ls боевого каталога, снос своего /tmp"    'ls -la /opt/apps/site; rm -rf /tmp/build.tmp'
+check allow "чтение конфига + снос /var/tmp"           'cat /etc/nginx/nginx.conf; rm -rf /var/tmp/scratch'
+# Имя временного каталога, содержащее слово боевого пути, — не боевой путь.
+check allow "во временном каталоге слово data в имени"  'rm -rf /tmp/data-dump'
+check allow "во временном каталоге слово etc в имени"   'rm -rf /tmp/etc-backup'
+
+# Фикстура обхода (составлена НЕ автором отчёта): посегментное послабление не должно
+# открыть ни одной из этих дверей.
+check deny  "безопасный сегмент прикрывает опасный"     'rm -rf /tmp/x; rm -rf /opt/prod'
+check deny  "выход из временного в боевой через .."     'rm -rf /tmp/../opt/prod'
+check deny  "cd в боевой + снос относительного пути"    'cd /opt/prod && rm -rf ./data'
+check deny  "чтение /tmp, снос боевого"                 'ls /tmp; rm -rf /opt/prod'
+check deny  "уборка /tmp и снос тома в одной цепочке"   'rm -rf /tmp/x && docker volume rm pgdata'
+
 echo "[2] Красная зона без подтверждения блокируется"
 check deny "rm -rf на боевом пути"          'rm -rf /opt/academii/data'
 check deny "rm -fr (переставленные флаги)"  'rm -fr /var/lib/postgresql'
