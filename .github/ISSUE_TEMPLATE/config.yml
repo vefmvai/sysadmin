@@ -14,5 +14,5 @@ contact_links:
     about: Как собрать диагностику без секретов, как оформить правку, куда что нести.
 
   - name: Безопасность — не в публичный issue
-    url: https://github.com/vefmvai/sysadmin/blob/main/CONTRIBUTING.md#правило-безопасности
+    url: https://github.com/vefmvai/sysadmin/blob/main/SECURITY.md
     about: Нашёл способ обойти замок или утечку секретов — не пиши публично, порядок описан здесь.
