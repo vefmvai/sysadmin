@@ -158,7 +158,7 @@ release-notes на newreleases.io.
 | **#5631** | v26.1.31 | `sessionPlacement: "path"` валит запуск (на Windows — `unsupported session placement: path`) | Не использовать `sessionPlacement: path` |
 | **#5923** | recent | XHTTP+REALITY к **локальному nginx** — `unexpected ccs message`. TCP+REALITY к тому же nginx работает | Использовать удалённый nginx; не локальный |
 | **#6048** | recent | VLESS+XHTTP+REALITY — серверные ошибки `failed to read client hello` | Не определён |
-| **#6085** | v26.5.3, v26.4.25 | TLS handshake `bad certificate` для XHTTP при валидном Let's Encrypt | Откатиться на более раннюю версию |
+| **#6085** | v26.5.3, v26.4.25 | ⚠️ **НЕ подтверждён.** Заявлен `bad certificate` при XHTTP, когда TLS терминирует **сам xray** (`security: tls`, .pem от Let's Encrypt). Закрыт `not_planned` 2026-05-08 с «close as no response» — данных для повтора автор не дал, майнтейнер указал на **сам сертификат**. Схемы «XHTTP за nginx» (`security: none`, TLS держит nginx) не касается. Сверено с первоисточником 2026-08-05 | **Откат версии НЕ нужен** — багом это не подтверждено. Столкнулся в режиме xray-TLS: сверить отпечаток сертификата `xray tls ping <dest>`, при совпадении — прописать его в `pinnedPeerCertSha256` |
 | **#5739** | — | Browser Dialer игнорирует `sessionId` и `seqStr` в `packet-up` | Не используется в продакшне |
 | **#2997** | — | Host header регистрозависим; нельзя добавить header key `"host"` | Использовать `Host` (с большой H) |
 
