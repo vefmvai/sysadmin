@@ -1,0 +1,18 @@
+# Выбор шаблона при создании issue.
+# blank_issues_enabled: false — пустой issue создать нельзя, только по шаблону.
+# Причина: без версии агента и без «что ожидали» разбор упирается в переписку,
+# а автор к тому моменту уже ушёл. Шаблон спрашивает это сразу.
+blank_issues_enabled: false
+
+contact_links:
+  - name: Вопрос «как этим пользоваться»
+    url: https://github.com/vefmvai/sysadmin/blob/main/README.md
+    about: Установка, первый запуск, список навыков — сначала посмотри README и INSTALL.
+
+  - name: Правила оформления и стиль коммитов
+    url: https://github.com/vefmvai/sysadmin/blob/main/CONTRIBUTING.md
+    about: Как собрать диагностику без секретов, как оформить правку, куда что нести.
+
+  - name: Безопасность — не в публичный issue
+    url: https://github.com/vefmvai/sysadmin/blob/main/CONTRIBUTING.md#правило-безопасности
+    about: Нашёл способ обойти замок или утечку секретов — не пиши публично, порядок описан здесь.
