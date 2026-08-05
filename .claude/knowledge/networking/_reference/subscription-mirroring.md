@@ -9,7 +9,7 @@ sources_checked: []
 # Зеркалирование платной VPN-подписки на свой сервер (обход лимита устройств)
 
 > Слой: `_reference` (устройство механизма, меняется кварталами). TTL 60 дней.
-> Подтверждено на устройстве 2026-05-22 (провайдер NurVPN, клиент Happ, сервер в РФ).
+> Подтверждено на устройстве 2026-05-22 (провайдер с HWID-привязкой, клиент Happ, сервер в РФ).
 > `sources_checked: []` — знание получено эмпирически на устройстве, не из веб-источников.
 
 ## Идея одной фразой
@@ -68,8 +68,8 @@ base64 -d sub.b64 | grep -c '^vless://'                 # сколько сер�
 base64 -d sub.b64 | grep -c '00000000-0000-0000'        # заглушек должно быть 0
 ```
 
-**Гео-блокировка.** Некоторые провайдеры (nurvpn) отдают 502/заглушку на не-РФ IP.
-NurVPN с РФ-сервера отдаёт нормально (проверено). Если с нужной машины не отдаёт —
+**Гео-блокировка.** Некоторые провайдеры отдают 502/заглушку на не-РФ IP.
+С РФ-сервера тот же провайдер отдаёт нормально (проверено). Если с нужной машины не отдаёт —
 делать запрос с РФ-хоста.
 
 ---
@@ -127,11 +127,11 @@ curl -sS -o /dev/null -w 'HTTP %{http_code} type=%{content_type}\n' \
 обновляет файл только при реальном изменении.
 
 Скрипты-эталоны (версионируются в приватной `infra/scripts/vpn/`):
-`nurvpn-sync.sh` + `nurvpn-canon.py` + `nurvpn-sync.env.example`.
+`sub-sync.sh` + `sub-canon.py` + `sub-sync.env.example`.
 
 ### Главная тонкость: подписка «дрожит» между запросами
 
-NurVPN при **каждом** запросе:
+Провайдер может при **каждом** запросе:
 1. тасует порядок vless-строк;
 2. тасует порядок query-параметров внутри каждой ссылки;
 3. **меняет значение `sid`** (Reality short ID) — случайное при каждом запросе.
@@ -139,7 +139,7 @@ NurVPN при **каждом** запросе:
 Поэтому наивное сравнение (`cmp`/sha сырого ответа) показывало бы «изменилось»
 каждый час впустую → шум в логах + Happ у всех пользователей дёргал бы «обновление».
 
-**Решение — канонический отпечаток** (`nurvpn-canon.py`): декодировать base64 →
+**Решение — канонический отпечаток** (`sub-canon.py`): декодировать base64 →
 для каждого vless взять `scheme://uuid@host:port` + **отсортированные** параметры
 **без волатильных** (`sid`, `spx`) + fragment → отсортировать набор серверов →
 sha256. Такой хеш стабилен между запросами и меняется только при настоящей замене
@@ -147,42 +147,42 @@ sha256. Такой хеш стабилен между запросами и ме
 
 > Если сменишь провайдера — проверь, какие параметры у него «дрожат»:
 > два запроса подряд, продекодировать, сравнить параметры общих хостов. Волатильные
-> (например `sid`) добавить в `VOLATILE_PARAMS` в `nurvpn-canon.py`.
+> (например `sid`) добавить в `VOLATILE_PARAMS` в `sub-canon.py`.
 
 ### Раскладка на сервере
 
 | Файл | Назначение | Права |
 |---|---|---|
-| `/opt/nurvpn-sync.sh` | оркестратор: curl → валидация → канон-сравнение → обновление | `755 root:root` |
-| `/opt/nurvpn-canon.py` | канонический отпечаток (порядок- и sid-независимый) | `755 root:root` |
-| `/opt/nurvpn-sync.env` | секреты: SUB_URL, HWID, TARGET (**не в git**) | `600 root:root` |
+| `/opt/sub-sync.sh` | оркестратор: curl → валидация → канон-сравнение → обновление | `755 root:root` |
+| `/opt/sub-canon.py` | канонический отпечаток (порядок- и sid-независимый) | `755 root:root` |
+| `/opt/sub-sync.env` | секреты: SUB_URL, HWID, TARGET (**не в git**) | `600 root:root` |
 | `/var/www/configs/<rnd>.txt` | раздаваемый список (его правит скрипт) | `644 www-data` |
-| `/var/log/nurvpn-sync.log` | лог (logrotate weekly×4) | — |
+| `/var/log/sub-sync.log` | лог (logrotate weekly×4) | — |
 
 ### Установка
 
 ```bash
 # скрипты
-scp infra/scripts/vpn/nurvpn-sync.sh  selectel:/opt/nurvpn-sync.sh
-scp infra/scripts/vpn/nurvpn-canon.py selectel:/opt/nurvpn-canon.py
-ssh selectel 'chmod 755 /opt/nurvpn-sync.sh /opt/nurvpn-canon.py'
+scp infra/scripts/vpn/sub-sync.sh  <ssh-алиас>:/opt/sub-sync.sh
+scp infra/scripts/vpn/sub-canon.py <ssh-алиас>:/opt/sub-canon.py
+ssh <ssh-алиас> 'chmod 755 /opt/sub-sync.sh /opt/sub-canon.py'
 
 # env (заполнить реальными значениями, на сервере)
-ssh selectel 'cat > /opt/nurvpn-sync.env << EOF
-SUB_URL="https://subs.nurvpn.com/<token>"
+ssh <ssh-алиас> 'cat > /opt/sub-sync.env << EOF
+SUB_URL="https://<домен-провайдера>/<token>"
 HWID="<hwid>"
 TARGET="/var/www/configs/<rnd>.txt"
 MIN_SERVERS=5
 KEEP_BAKS=5
 EOF
-chmod 600 /opt/nurvpn-sync.env'
+chmod 600 /opt/sub-sync.env'
 
 # cron раз в час (на :37, чтобы не толкаться с бэкапами в :00-:10)
-ssh selectel '(crontab -l 2>/dev/null; echo "37 * * * * /opt/nurvpn-sync.sh >> /var/log/nurvpn-sync.log 2>&1") | crontab -'
+ssh <ssh-алиас> '(crontab -l 2>/dev/null; echo "37 * * * * /opt/sub-sync.sh >> /var/log/sub-sync.log 2>&1") | crontab -'
 
 # logrotate
-ssh selectel 'cat > /etc/logrotate.d/nurvpn-sync << EOF
-/var/log/nurvpn-sync.log { su root root weekly rotate 4 compress missingok notifempty copytruncate }
+ssh <ssh-алиас> 'cat > /etc/logrotate.d/sub-sync << EOF
+/var/log/sub-sync.log { su root root weekly rotate 4 compress missingok notifempty copytruncate }
 EOF'
 ```
 
@@ -204,10 +204,10 @@ EOF'
 ### Диагностика
 
 ```bash
-ssh selectel 'tail -20 /var/log/nurvpn-sync.log'        # история синков
-ssh selectel '/opt/nurvpn-sync.sh; tail -1 /var/log/nurvpn-sync.log'  # ручной прогон
+ssh <ssh-алиас> 'tail -20 /var/log/sub-sync.log'        # история синков
+ssh <ssh-алиас> '/opt/sub-sync.sh; tail -1 /var/log/sub-sync.log'  # ручной прогон
 # канон текущего файла vs свежего ответа (должны совпадать, если изменений нет):
-ssh selectel 'python3 /opt/nurvpn-canon.py < /var/www/configs/<rnd>.txt'
+ssh <ssh-алиас> 'python3 /opt/sub-canon.py < /var/www/configs/<rnd>.txt'
 ```
 
 ---
@@ -216,7 +216,7 @@ ssh selectel 'python3 /opt/nurvpn-canon.py < /var/www/configs/<rnd>.txt'
 
 1. **`heredoc` + stdin-данные конфликтуют.** `python3 - ARG <<'PY' ... PY` со входными
    данными в пайпе ломается (heredoc и пайп оба борются за stdin). Решение — Python-логику
-   держать в **отдельном файле** (`nurvpn-canon.py`), а не во встроенном heredoc.
+   держать в **отдельном файле** (`sub-canon.py`), а не во встроенном heredoc.
 2. **`sid` дрожит.** Reality short ID рандомизируется провайдером каждый запрос — без его
    исключения из канона будет ложное «UPDATED» каждый час.
 3. **Имя файла обязано быть случайным.** `/var/www/configs/` отдаётся всему интернету;
@@ -227,7 +227,7 @@ ssh selectel 'python3 /opt/nurvpn-canon.py < /var/www/configs/<rnd>.txt'
 ## Связанное
 
 - `reference_happ_subscription_extraction` (память) — детали формата HAPP, заголовки, plist.
-- `project_nurvpn_subscription` (память) — конкретная подписка Василия + серверная ссылка.
+- `заметка о подписке в приватной памяти оператора` (память) — конкретная подписка Василия + серверная ссылка.
 - `client-apps.md` — клиенты и `happ://routing` профили.
 - `happ-subscription-format.md` — следующий уровень: не плоское base64-зеркало, а
   генерируемая мульти-кнопочная JSON-подписка из реестра (паттерн OpenGate).
