@@ -52,7 +52,7 @@ REQUIRED_KEYS = ("knowledge_domain", "layer", "last_researched", "ttl_days", "so
 # Префиксы путей, которые резолвим от КОРНЯ репо (а не от домена knowledge).
 REPO_ROOT_PREFIXES = (".claude/", "decisions/", "runbooks/", "scripts/", "docs/", "inventory/")
 # Каталоги-слои внутри домена.
-DOMAIN_DIRS = ("_live/", "_reference/", "_meta/", "_diagrams/")
+DOMAIN_DIRS = ("_live/", "_reference/", "_meta/", "_diagrams/", "_archive/")
 
 # Ссылки: markdown `](target)` и backtick `` `target` `` где target оканчивается на .md (+опц. #anchor).
 MD_LINK_RE = re.compile(r"\]\(([^)\s]+\.md(?:#[^)\s]*)?)\)")
@@ -66,6 +66,12 @@ def is_frontmatter_exempt(path: str) -> bool:
     if base.endswith(".example.md"):
         return True
     if os.sep + "_diagrams" + os.sep in path:   # диаграммы — не заметки-знания
+        return True
+    # `_archive/` — отменённое знание, вынесенное из рабочего файла целиком (05.08.2026).
+    # Frontmatter ему не положен намеренно: слой вне модели трёх слоёв ADR-0006, TTL у
+    # него нет и актуализации он не подлежит. Требовать шапку — значит завести файл,
+    # который вечно числится просроченным и шумит в отчёте о свежести.
+    if os.sep + "_archive" + os.sep in path:
         return True
     return False
 

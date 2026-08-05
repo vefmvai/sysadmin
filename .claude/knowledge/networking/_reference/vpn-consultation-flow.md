@@ -21,8 +21,27 @@ TUN-режим, расширения и FAQ. **Сами правила марш�
 (см. навигацию ниже).
 
 Документ читают:
-- персона `sysadmin.md` при VPN-консультации
+- персона (`CLAUDE.md` §4.3, сеньор-обёртка) при VPN-консультации
 - скиллы `/setup-vpn-panel`, `/configure-vpn-routing`, `/generate-client-config`
+
+> 📌 **Осознанное исключение из принципа «процедуры живут в скиллах» (решение 05.08.2026,
+> задача 4Б.3).** Формально этот файл — сценарий, а не справка, и по принципу 3
+> context-engineering ему полагался бы свой скилл. Скилл `/vpn-consultation` **не заведён
+> намеренно**, и вот почему:
+>
+> - Скилл запускается под задачу («поставь панель», «настрой маршрутизацию»), а этот
+>   документ нужен **до** того, как задача сформулирована: он помогает выбрать, какой
+>   скилл вообще звать. Такое место в архитектуре занимает персона §4.3, а не скилл.
+> - Его читают три разных скилла как общий контекст. Переехав в четвёртый, он стал бы
+>   зависимостью скилла от скилла — а сейчас это ровно то, чем должен быть `_reference/`:
+>   общее знание, к которому ходят все.
+> - Пошаговые части, у которых **есть** владелец, уже переехали: включение TUN → в
+>   `/generate-client-config`, триаж жалобы «не работает» → в `/finalize-vpn-routing`.
+>   Оставшееся — интервью, эталонная архитектура, объяснение TUN, FAQ по симптомам,
+>   развилки расширений — это материал для разговора, а не команды для выполнения.
+>
+> Если исключение когда-нибудь захочется пересмотреть — признак для этого один: у файла
+> появятся собственные скрипты или шаблоны конфигов. Пока их нет, он остаётся справкой.
 
 > ⚠️ **Важная смена модели (2026-05-22).** Раньше эта памятка предлагала гибкую
 > маршрутизацию **на клиенте через Hiddify**. На практике это не настраивается:
@@ -319,122 +338,16 @@ pip — ничего трогать не надо.
 т.д.) — в `routing-server-3xui.md` §5. Не дублируется здесь, чтобы был один
 источник правды.
 
-<!-- историческое содержимое §6.3-§6.8 (правила в sing-box-синтаксисе для Hiddify)
-удалено 2026-05-22 при смене модели на server-side routing. Актуальные правила:
-routing-server-3xui.md (Xray) и routing-on-device-singbox.md (sing-box). -->
-
-**DNS: чего в базе нет, и это честный пробел.** Настройки резолвера для Xray **на
-сервере** в базе знаний нет — ни в `routing-server-3xui.md`, ни где-либо ещё (проверено
-поиском по всем файлам 05.08.2026). До этой даты здесь стояло «настраивается на сервере —
-см. `routing-server-3xui.md`», и это отправляло читателя в файл, где о DNS нет ни строки.
-
-Что в базе про DNS **есть**:
-- зачем вообще DoH/DoT и блокируют ли резолверы в РФ — `fronting-strategies.md` §8;
-- поля DNS в профиле клиента (`RemoteDNS*`, `DomesticDNS*`) —
-  `happ-subscription-format.md` §4.1 и `client-apps.md`;
-- разбор «российский сайт под VPN отдаёт капчу»: резолвинг ушёл к домашнему резолверу,
-  маршрут — через зарубежный выход — `happ-subscription-format.md` §8;
-- смена формата DNS в ядре sing-box 1.12 — `routing-on-device-singbox.md`.
-
-<!-- ОБРЕЗАНО_ДО_§7
-- domain: rzd.ru → direct
-- domain: rzd-tour.ru → direct
-- domain: aeroflot.ru → direct
-- domain: aeroflot.com → direct
-- domain: pochta.ru → direct
-
-# IT-гиганты на не-.ru
-- domain: yandex.com → direct
-- domain: ya.ru → direct
-- domain: vk.com → direct
-- domain: max.app → direct
-- domain: 2gis.com → direct
-- domain: hh.io → direct
-
-# Маркетплейсы
-- domain: avito.ru → direct
-- domain: ozon.ru → direct
-- domain: ozon.com → direct
-- domain: wildberries.ru → direct
-- domain: wb.ru → direct
-- domain: megamarket.ru → direct
-- domain: sbermegamarket.ru → direct
-- domain: lamoda.ru → direct
-- domain: kuper.ru → direct  # бывший СберМаркет
-
-# Контент
-- domain: kinopoisk.ru → direct
-- domain: ivi.ru → direct
-- domain: start.ru → direct
-- domain: okko.tv → direct
-- domain: dzen.ru → direct
-
-# Доставка/еда
-- domain: delivery-club.ru → direct
-- domain: yandex.eda → direct
-- domain: samokat.ru → direct
-
-# Auto/недвига/работа
-- domain: drom.ru → direct
-- domain: auto.ru → direct
-- domain: cian.ru → direct
-- domain: hh.ru → direct
-- domain: headhunter.ru → direct
-- domain: youla.ru → direct
-
-# API/CDN российских сервисов
-- domain: appmetrica.yandex.net → direct
-- domain: vk-cdn.net → direct
-- domain: vk-portal.net → direct
-```
-
-**Этот список должен периодически обновляться** — добавляться новые сервисы.
-Хранится в виде massive sing-box rule или импортируется как rule-set.
-
-### 6.5 Уровень 5: блок рекламы и трекеров
-
-```yaml
-- domain: geosite:category-ads-all → block
-```
-
-**Что ловит:** глобальный список рекламы и трекеров (Google Ads, DoubleClick,
-Facebook Pixel, российские рекламные сети).
-
-**Бонус:** ускоряет загрузку сайтов и экономит трафик.
-
-### 6.6 Default правило
-
-```yaml
-- (всё что не подошло выше) → proxy (через РФ-сервер)
-```
-
-### 6.7 Порядок правил критичен
-
-**В sing-box правила выполняются сверху вниз. Первое совпавшее применяется.** Поэтому
-порядок:
-
-1. `geoip:private → direct` (локальная сеть, безусловно)
-2. `geosite:category-ads-all → block` (реклама — раньше всего)
-3. `geoip:ru → direct`
-4. `geosite:category-ru → direct`
-5. Regex по .ru/.su/.рф → direct
-6. Явный список российских .com/.io доменов → direct
-7. Default → proxy
-
-### 6.8 DNS-маршрутизация (защита от утечек)
-
-В Hiddify (Settings → DNS):
-
-```yaml
-# Российские домены резолвятся через Yandex DNS (быстро, не утекает в Google)
-- domain: regexp:.+\.(ru|su|рф)$ → 77.88.8.8
-- domain: geosite:category-ru → 77.88.8.8
-
-# Всё остальное через Cloudflare DoH (зашифровано, провайдер не видит DNS)
-- (default) → https://1.1.1.1/dns-query
-```
-
-ОБРЕЗАНО_ДО_§7 -->
+> 📦 **Историческое содержимое §6.3-§6.8 вынесено в архив 05.08.2026.**
+> Правила маршрутизации в sing-box-синтаксисе для Hiddify, явный список российских
+> доменов и настройка DNS в клиенте — модель, отменённая 22.05.2026 (см. врезку в шапке
+> документа). Текст жил здесь внутри HTML-комментария: тот прячет его от рендера, но не
+> от читающего сырой файл — 102 строки попадали в контекст и противоречили действующей
+> модели, а оглавление показывало заголовки разделов, которых нет.
+>
+> Ничего не удалено: текст целиком — `../_archive/client-side-routing-hiddify-2026-05.md`.
+> Действующие правила — `routing-server-3xui.md` (Xray, дефолт) и
+> `routing-on-device-singbox.md` (sing-box, для энтузиастов).
 
 ---
 
