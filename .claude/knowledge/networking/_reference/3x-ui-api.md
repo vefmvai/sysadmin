@@ -365,9 +365,9 @@ streamSettings:
 ```bash
 # на сервере с установленным Xray (внутри 3X-UI lежит в /usr/local/x-ui/bin/)
 /usr/local/x-ui/bin/xray-linux-amd64 x25519
-# вывод:
-# Private key: UuMBgl7MXTPx9inmQp2UC7Jcnwc6XYbwDNebonM-FCc
-# Public key:  9wjeUbiP8w8I4iVi3p9J3LbphTpW3ws5WjAGz6BiL14
+# вывод (значения ниже — ЗАГЛУШКИ, настоящие выдаёт сама команда):
+# Private key: <PRIVATE_KEY — только на сервере и в менеджере паролей, НЕ в git>
+# Public key:  <PUBLIC_KEY — идёт в клиентские конфиги>
 ```
 
 #### Mixed (SOCKS5+HTTP на одном порту, для серверного прокси)

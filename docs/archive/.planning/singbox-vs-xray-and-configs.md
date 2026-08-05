@@ -846,9 +846,9 @@ server {
 **Генерация ключей:**
 ```bash
 sing-box generate reality-keypair
-# вывод:
-# PrivateKey: UuMBgl7MXTPx9inmQp2UC7Jcnwc6XYbwDNebonM-FCc
-# PublicKey:  9wjeUbiP8w8I4iVi3p9J3LbphTpW3ws5WjAGz6BiL14
+# вывод (значения ниже — ЗАГЛУШКИ, настоящие выдаёт сама команда):
+# PrivateKey: <PRIVATE_KEY — только на сервере и в менеджере паролей, НЕ в git>
+# PublicKey:  <PUBLIC_KEY — идёт в клиентские конфиги>
 ```
 
 **Когда использовать sing-box на сервере вместо Xray:**

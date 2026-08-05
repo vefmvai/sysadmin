@@ -372,7 +372,7 @@ if self_test_setup "$AGENT_PATH" "$SYSADMIN_ROOT" "$INFRA_CONFIG_PATH"; then
     echo "  мозг:  $AGENT_PATH"
     echo "  карта: $INFRA_CONFIG_PATH"
 
-    # Активация версионируемого pre-commit hook (защита персоны от рассинхрона).
+    # Активация версионируемого pre-commit hook (персона + knowledge + секреты).
     # core.hooksPath включаем ОДИН раз на машине, идемпотентно; git-сбой не валит init.
     if [ -d "$SYSADMIN_ROOT/.git" ] && [ -f "$SYSADMIN_ROOT/.githooks/pre-commit" ]; then
         if [ "$(git -C "$SYSADMIN_ROOT" config core.hooksPath 2>/dev/null)" != ".githooks" ]; then
@@ -380,6 +380,12 @@ if self_test_setup "$AGENT_PATH" "$SYSADMIN_ROOT" "$INFRA_CONFIG_PATH"; then
                 && echo "→ pre-commit hook активирован (core.hooksPath=.githooks)." \
                 || echo "⚠️  не удалось включить core.hooksPath — пропускаю (необязательно)."
         fi
+        # Блок «секреты» в хуке — fail-closed: без gitleaks коммиты в ЭТОТ репозиторий
+        # будут отклоняться (C.5). Предупреждаем сразу, а не при первом непонятном отказе.
+        command -v gitleaks >/dev/null 2>&1 || cat <<'GITLEAKS_HINT'
+⚠️  gitleaks не найден. Хук проверяет коммиты на секреты и без него ОТКЛОНЯЕТ их.
+    Установка: https://github.com/gitleaks/gitleaks#installing
+GITLEAKS_HINT
     fi
     # дальше — Шаг 11
 else
