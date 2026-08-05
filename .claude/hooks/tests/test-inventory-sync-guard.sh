@@ -60,13 +60,13 @@ mk "$TMP/ro4.jsonl" "Bash:cat /etc/systemd/system/app.service | head -20"
 check pass "чтение unit-файла" "$TMP/ro4.jsonl"
 
 echo "[2] Изменение без обновления inventory — останавливаем"
-mk "$TMP/change1.jsonl" "Bash:ssh bronto 'docker compose up -d academii'"
+mk "$TMP/change1.jsonl" "Bash:ssh prod-host 'docker compose up -d academii'"
 check block "docker compose up" "$TMP/change1.jsonl"
-mk "$TMP/change2.jsonl" "Bash:ssh bronto 'systemctl restart nginx'"
+mk "$TMP/change2.jsonl" "Bash:ssh prod-host 'systemctl restart nginx'"
 check block "systemctl restart" "$TMP/change2.jsonl"
-mk "$TMP/change3.jsonl" "Bash:ssh bronto 'ufw allow 8443'"
+mk "$TMP/change3.jsonl" "Bash:ssh prod-host 'ufw allow 8443'"
 check block "правило firewall" "$TMP/change3.jsonl"
-mk "$TMP/change4.jsonl" "Bash:ssh bronto 'docker network create services'"
+mk "$TMP/change4.jsonl" "Bash:ssh prod-host 'docker network create services'"
 check block "новая сеть" "$TMP/change4.jsonl"
 
 echo "[2а] Выкатка скриптом-обёрткой — тоже изменение (пропуск 2026-08-04)"
@@ -74,13 +74,13 @@ echo "[2а] Выкатка скриптом-обёрткой — тоже изм
 # живут ВНУТРИ скрипта на сервере, а в ход попадает только его вызов. Замок ловил
 # прямые команды и молчал на обёртке: выкатка пересоздала контейнер, ответ закончился
 # словами «инфраструктуру это не меняло», отставание снимка заметил оператор.
-mk "$TMP/wrap1.jsonl" "Bash:./scripts/deploy/deploy-remote.sh bronto"
+mk "$TMP/wrap1.jsonl" "Bash:./scripts/deploy/deploy-remote.sh prod-host"
 check block "деплой с ноутбука" "$TMP/wrap1.jsonl"
-mk "$TMP/wrap2.jsonl" "Bash:ssh bronto 'cd /opt/infra && ./deploy.sh'"
+mk "$TMP/wrap2.jsonl" "Bash:ssh prod-host 'cd /opt/infra && ./deploy.sh'"
 check block "серверный deploy.sh" "$TMP/wrap2.jsonl"
 mk "$TMP/wrap3.jsonl" "Bash:cd ~/Projects/app && ./deploy.sh"
 check block "деплой чужого проекта" "$TMP/wrap3.jsonl"
-mk "$TMP/wrap4.jsonl" "Bash:ssh bronto 'cd /opt/apps/bot && ./update.sh'"
+mk "$TMP/wrap4.jsonl" "Bash:ssh prod-host 'cd /opt/apps/bot && ./update.sh'"
 check block "update.sh" "$TMP/wrap4.jsonl"
 # Граница: упоминание внутри read-only команды изменением не считается (правило 4).
 mk "$TMP/wrap5.jsonl" "Bash:grep -n 'deploy.sh' README.md"
@@ -89,18 +89,18 @@ mk "$TMP/wrap6.jsonl" "Bash:cat scripts/deploy/deploy-remote.sh"
 check pass "чтение самого скрипта выкатки" "$TMP/wrap6.jsonl"
 
 echo "[3] Изменение + обновление inventory — пропускаем"
-mk "$TMP/ok1.jsonl" "Bash:ssh bronto 'docker compose up -d'" "Edit:/infra/inventory/hosts/bronto/services.md"
+mk "$TMP/ok1.jsonl" "Bash:ssh prod-host 'docker compose up -d'" "Edit:/infra/inventory/hosts/prod-host/services.md"
 check pass "правка inventory в том же ходе" "$TMP/ok1.jsonl"
-mk "$TMP/ok2.jsonl" "Bash:ssh bronto 'systemctl restart nginx'" "Bash:ssh bronto '/opt/infra-dashboard/bin/refresh.sh'"
+mk "$TMP/ok2.jsonl" "Bash:ssh prod-host 'systemctl restart nginx'" "Bash:ssh prod-host '/opt/infra-dashboard/bin/refresh.sh'"
 check pass "пересборка снимка/дашборда" "$TMP/ok2.jsonl"
-mk "$TMP/ok3.jsonl" "Bash:ssh bronto 'docker compose up -d'" "Bash:bash scripts/dump-snapshot.sh bronto"
+mk "$TMP/ok3.jsonl" "Bash:ssh prod-host 'docker compose up -d'" "Bash:bash scripts/dump-snapshot.sh prod-host"
 check pass "пересъёмка снимка" "$TMP/ok3.jsonl"
 
 echo "[4] Защита от зацикливания"
-mk "$TMP/loop.jsonl" "Bash:ssh bronto 'docker compose restart api'"
+mk "$TMP/loop.jsonl" "Bash:ssh prod-host 'docker compose restart api'"
 check block "первый раз останавливаем" "$TMP/loop.jsonl"
 check pass  "второй раз тот же ход — пропускаем (метка)" "$TMP/loop.jsonl"
-mk "$TMP/loop2.jsonl" "Bash:ssh bronto 'docker compose restart web'"
+mk "$TMP/loop2.jsonl" "Bash:ssh prod-host 'docker compose restart web'"
 check pass  "stop_hook_active=true — пропускаем" "$TMP/loop2.jsonl" true
 
 echo "[5] Fail-open: непонятный вход не мешает работе"

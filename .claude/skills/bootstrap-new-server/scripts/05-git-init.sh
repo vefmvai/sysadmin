@@ -17,7 +17,7 @@ set -euo pipefail
 echo "[05-git-init] ADMIN_USER=$ADMIN_USER  INFRA_DIR=$INFRA_DIR"
 
 # --- 0. Пререквизиты: git + gitleaks ---
-# Минимальные образы Ubuntu 24.04 идут БЕЗ git (боевой кейс bronto 2026-07-09:
+# Минимальные образы Ubuntu 24.04 идут БЕЗ git (боевой кейс 2026-07-09:
 # «git: command not found»), а gitleaks нет в apt вовсе — без него pre-commit hook
 # ниже превращается в пустышку и защита от коммита секретов молча не работает.
 if ! command -v git >/dev/null 2>&1; then

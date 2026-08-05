@@ -109,7 +109,7 @@ LANG_FROM_CONFIG=$(get_agent_field '.operator.language' '.language' ru)
 1. Создаёт пользователя `$ADMIN_USER` (если ещё нет), добавляет в группу `sudo`.
 2. Настраивает **NOPASSWD-sudo** (`/etc/sudoers.d/90-$ADMIN_USER` + `visudo -c`) — обязательный
    анти-lockout шаг: `useradd` не задаёт пароль, и без NOPASSWD после отключения root на
-   сервере не останется работающего sudo (боевой кейс bronto 2026-07-09). Ключ — единственный
+   сервере не останется работающего sudo (боевой кейс 2026-07-09). Ключ — единственный
    фактор входа; безопасность не ниже заменяемой схемы «root по ключу».
 3. Устанавливает `$SSH_KEY_PUB` в `/home/$ADMIN_USER/.ssh/authorized_keys` (mode 600, owner — admin).
 4. Правит `/etc/ssh/sshd_config`: `PermitRootLogin no`, `PasswordAuthentication no`, `Port $SSH_PORT`.
@@ -226,7 +226,7 @@ ssh $ADMIN_USER@$SERVER_IP -p $SSH_PORT "ls -la $INFRA_DIR && cd $INFRA_DIR && g
 
 Должны быть: `.gitignore`, `decisions/`, `incidents/`, `runbooks/`, `inventory/`, один первичный коммит.
 Плюс `gitleaks version` отвечает (скрипт ставит git из apt и gitleaks бинарником с GitHub,
-если их нет — минимальная Ubuntu 24.04 идёт без git, боевой кейс bronto 2026-07-09).
+если их нет — минимальная Ubuntu 24.04 идёт без git, боевой кейс 2026-07-09).
 
 ## Шаг 5.5: Приёмка — пройти чек-лист
 
@@ -277,15 +277,15 @@ ssh $ADMIN_USER@$SERVER_IP -p $SSH_PORT "ls -la $INFRA_DIR && cd $INFRA_DIR && g
 - **«UFW работает в Docker»** — UFW и Docker конфликтуют по iptables. Docker по умолчанию обходит UFW для контейнеров с `ports:`. Решение: либо `iptables=false` в `/etc/docker/daemon.json` (но тогда контейнеры теряют сеть), либо настройка `DOCKER-USER` chain в UFW — см. `references/ubuntu-vs-debian-quirks.md`. На свежем сервере без контейнеров пока не критично, но знай заранее. Полная картина (3 решения по возрастанию радикальности + дефолт `127.0.0.1:port` биндинг) — в эталоне `.claude/knowledge/networking/_reference/server-networks-defaults.md` §7.
 - **«git есть на любом Ubuntu»** — минимальные образы 24.04 идут БЕЗ git: `05-git-init.sh`
   падал «git: command not found», а gitleaks в apt нет вовсе — hook-защита от секретов молча
-  не появлялась. Урок (bronto 2026-07-09): скрипт 05 сам ставит git (apt) + gitleaks (бинарник
+  не появлялась. Урок (2026-07-09): скрипт 05 сам ставит git (apt) + gitleaks (бинарник
   с GitHub releases) и честно предупреждает, если GitHub недоступен.
 - **«создал admin-юзера — sudo работает»** — `useradd` не задаёт пароль; с закомментированным
   NOPASSWD-блоком после `PermitRootLogin no` + restart sshd на сервере не остаётся работающего
-  sudo (lockout, единственный путь — консоль провайдера). Урок (bronto 2026-07-09): NOPASSWD
+  sudo (lockout, единственный путь — консоль провайдера). Урок (2026-07-09): NOPASSWD
   теперь обязательный шаг скрипта 01 + verify `sudo -n true` ДО рестарта sshd.
 - **«`ufw limit` на SSH — бесплатная защита»** — нет, она дублирует fail2ban и мешает работе.
   `ufw limit` банит IP при 6+ новых коннектах за 30 сек — это ловит не только брутфорс, но и
-  ЛЕГИТИМНУЮ пачку SSH-подключений при автоматизации/деплое/миграции (боевой кейс bronto
+  ЛЕГИТИМНУЮ пачку SSH-подключений при автоматизации/деплое/миграции (боевой кейс
   2026-07-09: прямой Mac→сервер рвался `Connection closed`/`timed out`, а fail2ban при этом был
   чист — виноват был UFW-лимит). Скилл ставит `ufw allow`, а brute-force отдаёт fail2ban (шаг 03,
   jail sshd) — он банит по НЕУДАЧНЫМ логинам из auth.log, точечнее и без ложных срабатываний на
