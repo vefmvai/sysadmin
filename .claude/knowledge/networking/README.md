@@ -43,7 +43,8 @@
 | Отдельный чистый выход для нейросетей; почему скачущий IP хуже «плохой страны» | `_reference/vpn-consultation-flow.md` §9 |
 | Как вести VPN-консультацию с новичком: какие вопросы задать, эталонная архитектура | `_reference/vpn-consultation-flow.md` §1-§8 |
 | **DNS как рубеж блокировок:** зачем DoH/DoT, блокируют ли сами резолверы в РФ | `_reference/fronting-strategies.md` §8 |
-| **DNS в профиле клиента:** DoH для зарубежных и российских доменов, «маршрут ведёт в direct, а резолвинг идёт через VPN» | `_reference/happ-subscription-format.md` §8 + `_reference/client-apps.md` (поля профиля Happ) |
+| **DNS в профиле клиента:** поля `RemoteDNS*` и `DomesticDNS*`, разные DoH-резолверы для зарубежных и российских доменов | `_reference/happ-subscription-format.md` §4.1 + `_reference/client-apps.md` |
+| **Российский сайт под VPN отдаёт капчу или таймаут**, хотя сам сайт живой: резолвинг ушёл к домашнему резолверу, а маршрут — через зарубежный выход | `_reference/happ-subscription-format.md` §8 |
 | После обновления клиента конфиг не грузится: **сменился формат DNS** в ядре sing-box 1.12 | `_reference/routing-on-device-singbox.md` |
 | **Что такое TUN**, чем отличается от режима системного прокси, почему без него часть программ идёт мимо | `_reference/vpn-consultation-flow.md` §5.1-5.3 |
 | **Как включить TUN** на телефоне или ноутбуке, «работает только браузер» | скилл `/generate-client-config` → `.claude/skills/generate-client-config/references/platform-quirks.md` |
