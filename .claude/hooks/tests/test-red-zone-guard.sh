@@ -110,6 +110,21 @@ check deny  "cd в боевой + снос относительного пути
 check deny  "чтение /tmp, снос боевого"                 'ls /tmp; rm -rf /opt/prod'
 check deny  "уборка /tmp и снос тома в одной цепочке"   'rm -rf /tmp/x && docker volume rm pgdata'
 
+echo "[1в] Временный каталог агента: переменная и раскладка Windows"
+# `$TMPDIR` проверялся шаблоном заглавными, а сравнение идёт по нижнему регистру —
+# совпадения не было никогда. На Windows временный каталог агента лежит не в /tmp,
+# а в …/AppData/Local/Temp/…, поэтому исключение там не работало вовсе: замок требовал
+# type-to-confirm за уборку файлов, созданных агентом минуту назад (против ADR-0038).
+check allow "переменная TMPDIR"  'rm -rf "$TMPDIR/scratch"'
+check allow "переменная TEMP"    'rm -rf "$TEMP/claude-run"'
+check allow "msys-форма пути"    'rm -rf /c/users/operator/appdata/local/temp/claude/proj/sess/scratchpad/x'
+check allow "нативная форма"     'rm -rf "C:\Users\operator\AppData\Local\Temp\claude\proj\sess\scratchpad\x"'
+# Контроль: исключение НЕ открывает дорогу боевым путям, каким бы временным путём
+# команда ни начиналась — та же логика, что у /tmp в блоке [1б].
+check deny  "windows-temp + боевой путь" \
+  'rm -rf /c/users/operator/appdata/local/temp/x /opt/prod'
+check deny  "похожий, но не temp путь"   'rm -rf /c/users/operator/documents/archive'
+
 echo "[2] Красная зона без подтверждения блокируется"
 check deny "rm -rf на боевом пути"          'rm -rf /opt/academii/data'
 check deny "rm -fr (переставленные флаги)"  'rm -fr /var/lib/postgresql'
