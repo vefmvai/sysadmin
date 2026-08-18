@@ -156,7 +156,15 @@ if [ "$OUTPUT_FORMAT" = "json" ]; then
     echo "$RESULTS_JSON"
 else
     if [ -z "$RESULTS_HUMAN" ]; then
-        if [ -n "$DOMAIN_FILTER" ]; then
+        # Пустой вывод бывает по двум РАЗНЫМ причинам, и путать их нельзя:
+        #   1) файлов с frontmatter нет вовсе — плохая новость, знание вне контроля свежести;
+        #   2) режим --stale-only, файлы есть, но просроченных среди них нет — хорошая новость.
+        # До 2026-08-18 на оба случая печаталась одна строка «Нет tracked knowledge-файлов»,
+        # и штатное «всё свежо» читалось как «база пропала»: агент шёл перепроверять, не сломал
+        # ли он frontmatter. TOTAL_COUNT считается ДО фильтра --stale-only, поэтому различает их.
+        if [ "$TOTAL_COUNT" -gt 0 ]; then
+            echo "Все knowledge-файлы в актуальном TTL: проверено $TOTAL_COUNT, просроченных нет."
+        elif [ -n "$DOMAIN_FILTER" ]; then
             echo "Нет tracked knowledge-файлов в домене '$DOMAIN_FILTER'."
         else
             echo "Нет tracked knowledge-файлов с frontmatter (knowledge_domain/last_researched/ttl_days)."
