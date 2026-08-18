@@ -1,7 +1,7 @@
 ---
 knowledge_domain: vpn
 layer: reference
-last_researched: 2026-06-15
+last_researched: 2026-08-17
 ttl_days: 60
 sources_checked:
   - https://www.happ.su/main/ru/dev-docs/app-management.md
@@ -126,7 +126,20 @@ sources_checked:
 | `subscription-userinfo` | `upload=…;download=…;total=…;expire=…` | показ квоты/срока |
 | `dns-from-json-enable` | `true` | использовать DNS из JSON-конфига (а не из профиля) |
 | `per-app-proxy-mode`/`-list` | `off/on/bypass`, `com.app,…` | per-app routing (Android) |
+| `new-url` / `new-domain` | URL / домен | **переезд подписки на новый адрес без переустановки у клиента** (требует Provider ID) |
+| `fallback-url` | URL | запасной адрес подписки, если основной недоступен |
+| `subscription-always-hwid-enable` | `true` | неотключаемая привязка к устройству (HWID) |
+| `tun-type` | `singbox`/`tun2proxy`/`default` | каким ядром клиент поднимает туннель |
+| `server-address-resolve-enable` (+`-dns-domain`, `-dns-ip`) | `true` | резолвить домены серверов на стороне клиента заданным DNS |
+| `no-limit-enabled`, `no-limit-xhttp-enabled` | `true` | режим No Limit Mode |
 | `hide-settings`, `manual-block-user-agent`, `mux-*`, `fragmentation-*`, `noises-*`, `tun-*` | — | прочие тонкие настройки (см. app-management.md) |
+
+> **Здесь только значимое для нашей подписки.** В `app-management.md` заголовков около
+> **шестидесяти** — полный перечень держим в источнике, а не в выжимке. Отобраны те, что
+> меняют наши решения: тройка `new-url`/`new-domain`/`fallback-url` — это переезд подписки
+> при блокировке домена **без действий на стороне семьи**; `subscription-always-hwid-enable`
+> смыкается с добычей серверов из закрытых подписок; `tun-type` — с нижней планкой ядра
+> sing-box (рефлекс §3.8.3).
 
 ## 4. Профиль-манифест и iOS-нарезка гео (UseChunkFiles)
 
