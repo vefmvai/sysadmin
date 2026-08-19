@@ -244,7 +244,8 @@ sysadmin/                          ← публичный репо (этот). �
 ├── infra-config.schema.json       ← JSON Schema конфига карты инфры
 │
 ├── retro/                         ← петля самоулучшения: правила разбора сессии (retro/README.md)
-├── .githooks/                     ← ★ ЗАМОК КОММИТА: персона, знания, переносимость inline-кода
+├── .githooks/                     ← ★ ЗАМОК КОММИТА: персона, знания, переносимость inline-кода,
+│                                     схема карты инфры
 │                                     (включается один раз: git config core.hooksPath .githooks)
 ├── scripts/                       ← линтеры и валидаторы мозга (прогон вручную и из pre-commit)
 │   ├── validate-knowledge.py      ← целостность базы знаний: frontmatter, слои, ссылки, сироты
@@ -253,6 +254,8 @@ sysadmin/                          ← публичный репо (этот). �
 │   ├── test-shell-portability.sh  ← тест этого линтера: 77 проверок, фикстура обхода + история git
 │   ├── test-host-digest.sh        ← тест переходника host-digest: отказы, сторож времени,
 │                                     маскировка секретов (ADR-0030)
+│   ├── test-infra-config-schema.py ← тест схемы карты инфры: 20 случаев в обе стороны
+│                                     (нужен jsonschema; «JSON разбирается» ≠ «схема работает»)
 │   └── run-evals.sh               ← прогон evals/triggers.md по скиллам
 ├── docs/archive/                  ← исторические артефакты (docs/archive/README.md)
 │

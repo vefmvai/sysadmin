@@ -72,11 +72,17 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["enabled"],
-      "description": "Подсистема мониторинга. Если enabled=true — агент использует готовые UI-панели (Uptime Kuma / Beszel / Dozzle / Dockge / Diun). Если enabled=false — мониторинга нет, агент работает «вслепую» по запросу.",
+      "description": "Подсистема мониторинга. Если enabled=true — наблюдение настроено: либо готовыми UI-панелями (Uptime Kuma / Beszel / Dozzle / Dockge / Diun), либо самописными проверками (kind=custom). Если enabled=false — наблюдения нет, агент работает «вслепую» по запросу.",
       "properties": {
         "enabled": {
           "type": "boolean",
-          "description": "Включён ли стек мониторинга. true — на сервере развёрнут хотя бы один компонент. false — мониторинга нет."
+          "description": "Включено ли наблюдение. true — на сервере работает хотя бы один компонент или самописный обходчик. false — наблюдения нет."
+        },
+        "kind": {
+          "type": "string",
+          "enum": ["stack", "custom"],
+          "default": "stack",
+          "description": "Как устроено наблюдение. stack (по умолчанию) — развёрнуты готовые продукты из списка stack, у них есть веб-панель, поэтому обязательны поля stack и panel_domain. custom — наблюдение самописное (свои скрипты, systemd-таймеры, уведомления в мессенджер); веб-панели может не быть сознательно, поэтому stack и panel_domain не требуются. Заполняется вручную или /sysadmin-init."
         },
         "stack": {
           "type": "array",
@@ -241,12 +247,22 @@
   },
   "allOf": [
     {
-      "description": "Если monitoring.enabled=true → обязательны stack и panel_domain.",
+      "description": "Если monitoring.enabled=true И kind не 'custom' → обязательны stack и panel_domain. При kind='custom' наблюдение самописное: готового продукта из списка нет, веб-панели может не быть сознательно — тогда ни stack, ни panel_domain не требуются.",
       "if": {
         "properties": {
           "monitoring": {
-            "properties": { "enabled": { "const": true } },
-            "required": ["enabled"]
+            "allOf": [
+              {
+                "properties": { "enabled": { "const": true } },
+                "required": ["enabled"]
+              },
+              {
+                "not": {
+                  "properties": { "kind": { "const": "custom" } },
+                  "required": ["kind"]
+                }
+              }
+            ]
           }
         },
         "required": ["monitoring"]
