@@ -9,8 +9,13 @@
 
 Запуск из корня репо:  python3 scripts/test-infra-config-schema.py
 
-Требует `jsonschema` (pip install --user jsonschema). Без него — честный отказ, а не
-молчаливый зелёный: сломанный тест печатает «чисто» так же, как исправный.
+Требует `jsonschema`. Многие системные python его ставить не дают (PEP 668,
+«externally-managed-environment»), поэтому модуль живёт в отдельном окружении, а тест
+сам туда перезапускается: сперва каталог из переменной `SYSADMIN_VENV`, затем `.venv`
+в корне репозитория. Не нашлось ни того ни другого — честный отказ, а не молчаливый
+зелёный: сломанный тест печатает «чисто» так же, как исправный.
+
+Завести окружение:  python3 -m venv .venv && ./.venv/bin/python3 -m pip install jsonschema
 
 Каждый случай проверяется В ОБЕ СТОРОНЫ — что схема пропускает валидное И что она
 отклоняет невалидное. Проверка только на здоровом входе доказывает лишь то, что код
@@ -23,14 +28,40 @@
 
 import copy
 import json
+import os
 import sys
 from pathlib import Path
+
+
+def _reexec_in_venv():
+    """Перезапуск в отдельном окружении, если в текущем python нет jsonschema.
+
+    Флаг в окружении защищает от петли: в перезапущенном процессе повторной попытки
+    уже не будет, и он честно дойдёт до отказа.
+    """
+    if os.environ.get("SYSADMIN_SCHEMA_REEXEC") == "1":
+        return
+    root = Path(__file__).resolve().parent.parent
+    candidates = []
+    if os.environ.get("SYSADMIN_VENV"):
+        candidates.append(Path(os.environ["SYSADMIN_VENV"]))
+    candidates.append(root / ".venv")
+    for venv in candidates:
+        for rel in ("bin/python3", "Scripts/python.exe"):   # POSIX и Windows
+            exe = venv / rel
+            if exe.exists():
+                env = dict(os.environ, SYSADMIN_SCHEMA_REEXEC="1")
+                os.execve(str(exe), [str(exe), str(Path(__file__).resolve()), *sys.argv[1:]], env)
+
 
 try:
     import jsonschema
 except ImportError:
+    _reexec_in_venv()          # не вернётся, если окружение нашлось
     print("ОТКАЗ: не установлен модуль jsonschema.")
-    print("       Поставь: pip install --user jsonschema")
+    print("       Заведи окружение в корне репозитория:")
+    print("         python3 -m venv .venv && ./.venv/bin/python3 -m pip install jsonschema")
+    print("       Или укажи готовое: SYSADMIN_VENV=/путь/к/venv")
     print("       Без него проверить схему нечем — молча зелёным не притворяюсь.")
     sys.exit(2)
 

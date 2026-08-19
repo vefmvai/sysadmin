@@ -149,7 +149,9 @@ if [ "$SCHEMA_TOUCHED" -eq 1 ]; then
         if [ "$SCHEMA_RC" -eq 2 ]; then
             # Нет модуля jsonschema — проверить нечем. Не блокирую (на чужой машине
             # его может не быть), но и молча зелёным не притворяюсь.
-            echo "⚠️  pre-commit: схему проверить нечем — поставь: pip install --user jsonschema" >&2
+            echo "⚠️  pre-commit: схему проверить нечем. Заведи окружение в корне репо:" >&2
+            echo "     python3 -m venv .venv && ./.venv/bin/python3 -m pip install jsonschema" >&2
+            echo "     (тест сам перезапустится в .venv; готовое окружение — SYSADMIN_VENV=/путь)" >&2
         elif [ "$SCHEMA_RC" -ne 0 ]; then
             echo >&2
             echo "❌ pre-commit: схема карты инфры ведёт себя не так, как задумано." >&2
