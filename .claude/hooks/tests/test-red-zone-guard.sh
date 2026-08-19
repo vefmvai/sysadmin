@@ -125,6 +125,22 @@ check deny  "windows-temp + боевой путь" \
   'rm -rf /c/users/operator/appdata/local/temp/x /opt/prod'
 check deny  "похожий, но не temp путь"   'rm -rf /c/users/operator/documents/archive'
 
+echo "[1г] Границы расширенного исключения (доработка PR #11)"
+# Проба противоположными случаями 19.08.2026 показала четыре прохода. Два открыл сам
+# PR #11 (голое слово вместо переменной), два — выход вверх по дереву, причём для ветки
+# /tmp этот проход жил с самого начала: путь начинался во временном каталоге, а
+# заканчивался в домашнем, и список боевых каталогов такое не ловит.
+check deny  "голое слово temp, не переменная"   'rm -rf temp'
+check deny  "голое слово tmp, не переменная"    'rm -rf tmp'
+check deny  "выход вверх из временного"         'rm -rf "$TMPDIR/../../Documents"'
+check deny  "выход вверх из /tmp в домашний"    'rm -rf /tmp/../Users/operator/Documents'
+check deny  "выход вверх из windows-temp"       'rm -rf /c/users/op/appdata/local/temp/../../documents'
+check deny  "windows-temp с обратными слешами наружу" \
+  'rm -rf "c:\users\op\appdata\local\temp\..\..\..\..\windows\system32"'
+# Контроль: ужесточение не убило само исключение — штатная уборка по-прежнему проходит.
+check allow "штатная уборка через $TMPDIR"      'rm -rf "$TMPDIR/scratch"'
+check allow "штатная уборка windows-temp"       'rm -rf /c/users/op/appdata/local/temp/claude/p/s/scratchpad/x'
+
 echo "[2] Красная зона без подтверждения блокируется"
 check deny "rm -rf на боевом пути"          'rm -rf /opt/academii/data'
 check deny "rm -fr (переставленные флаги)"  'rm -fr /var/lib/postgresql'
