@@ -1,16 +1,22 @@
 ---
 knowledge_domain: vpn
 layer: reference
-last_researched: 2026-05-22
+last_researched: 2026-08-11
 ttl_days: 60
-sources_checked: []
+sources_checked:
+  - https://applecensorship.com/app-store-monitor/app/6746188973
+  - https://apps.apple.com/us/app/happ-proxy-utility/id6504287215
+  - https://github.com/Happ-proxy/happ-android/releases
+  - https://github.com/Happ-proxy/happ-desktop/releases
+  - https://www.happ.su/main/dev-docs/routing
 ---
 
 # Зеркалирование платной VPN-подписки на свой сервер (обход лимита устройств)
 
 > Слой: `_reference` (устройство механизма, меняется кварталами). TTL 60 дней.
 > Подтверждено на устройстве 2026-05-22 (провайдер с HWID-привязкой, клиент Happ, сервер в РФ).
-> `sources_checked: []` — знание получено эмпирически на устройстве, не из веб-источников.
+> Сам механизм получен эмпирически на устройстве, не из веб-источников; в `sources_checked`
+> — страницы, по которым сверялись версии клиентов и поведение Happ (сверка 2026-08-11).
 
 ## Идея одной фразой
 
@@ -50,13 +56,25 @@ sources_checked: []
 «Достигнут лимит устройств».
 
 ```bash
-# HWID берётся из plist Happ на маке (НЕ выдумывать):
-plutil -p ~/Library/Group\ Containers/group.su.ffg.happ.plus/Library/Preferences/group.su.ffg.happ.plus.plist | grep hwid
+# HWID берётся из plist УСТАНОВЛЕННОЙ сборки Happ на маке (НЕ выдумывать).
+# Имя group-контейнера зависит от сборки: «Happ - Proxy Utility Plus»
+# (bundle id su.ffg.happ.plus) снята с App Store — последний раз была доступна
+# 22.06.2026, на 04.08.2026 недоступна во всех 175 проверяемых витринах;
+# у основной сборки контейнер, скорее всего, свой — это ВЫВОД из другого bundle id,
+# а не проверенный факт: имя контейнера на официальных страницах не показано, в
+# dev-docs Happ про macOS-пути ничего нет. Поэтому не угадываем, а сперва находим
+# контейнер, потом читаем из него:
+ls ~/Library/Group\ Containers | grep -i happ
+plutil -p ~/Library/Group\ Containers/<НАЙДЕННЫЙ>/Library/Preferences/<НАЙДЕННЫЙ>.plist | grep hwid
 # → "hwid" => "<16-символьный hex, например 0123456789abcdef>"
 
-# Запрос подписки (формат ответа — base64 от списка vless://, по одному на строку):
+# Запрос подписки (формат ответа — base64 от списка vless://, по одному на строку).
+# Версию в User-Agent держать на уровне живого клиента: ветка iOS ушла с 4.x на 5.x
+# в июле 2026 (5.4.0 — 10-11.08.2026), актуальную сверяй в App Store. Номер версии
+# берётся со страницы App Store, где сборка одна на iPhone/iPad/Mac, — поэтому он
+# и подставляется в запрос с заголовками мака ниже, противоречия здесь нет.
 curl -sL --max-time 30 \
-  -H 'User-Agent: Happ/4.9.0' \
+  -H 'User-Agent: Happ/5.4.0' \
   -H 'X-Device-Os: macOS' -H 'X-Device-Locale: ru' \
   -H 'X-Device-Model: MacBookPro' -H 'X-Ver-Os: 14' \
   -H 'Connection: close' \
@@ -115,8 +133,13 @@ curl -sS -o /dev/null -w 'HTTP %{http_code} type=%{content_type}\n' \
 (и в любой клиент: sing-box, v2rayN, Streisand) **как обычная подписка** — `+` →
 вставить ссылку. HWID-привязки и лимита устройств нет.
 
-> Опционально к серверам можно приложить routing-профиль провайдера —
-> см. `client-apps.md` про `happ://routing/onadd/<base64-json>`.
+> Опционально к зеркалу можно приложить routing-профиль провайдера, но с Happ Android
+> 4.0.0 (28.07.2026, «Major update to the routing flow: linking profiles to subscriptions»)
+> профили привязаны к КОНКРЕТНОЙ подписке: у каждой подписки свой изолированный набор
+> правил и профилей, а при удалении подписки все привязанные к ней профили (и их
+> кешированные geo-файлы) стираются каскадом — https://www.happ.su/main/dev-docs/routing.
+> Профиль прикладывается к своему зеркалу и после пересоздания ссылки добавляется
+> заново — см. `client-apps.md` про `happ://routing/onadd/<base64-json>`.
 
 ---
 
@@ -138,6 +161,11 @@ curl -sS -o /dev/null -w 'HTTP %{http_code} type=%{content_type}\n' \
 
 Поэтому наивное сравнение (`cmp`/sha сырого ответа) показывало бы «изменилось»
 каждый час впустую → шум в логах + Happ у всех пользователей дёргал бы «обновление».
+Лишнее «обновление» — не только шум: в десктопном Happ до версии 3.3.6 (исправлено
+20.07.2026) подвисшее обновление подписки стирало у пользователя сохранённый список
+серверов. Отсюда два требования: зеркало обязано отвечать быстро и кодом 200 (а при
+сбое — не отвечать мусором), десктопным клиентам — быть на 3.3.6 и новее. У iOS-ветки
+нумерация другая (5.x), так что искать версию 3.3.6 на iPhone бессмысленно.
 
 **Решение — канонический отпечаток** (`sub-canon.py`): декодировать base64 →
 для каждого vless взять `scheme://uuid@host:port` + **отсортированные** параметры

@@ -1,7 +1,7 @@
 ---
 knowledge_domain: server-infra
 layer: reference
-last_researched: 2026-05-28
+last_researched: 2026-08-11
 ttl_days: 60
 sources_checked:
   - https://docs.docker.com/engine/network/
@@ -285,7 +285,8 @@ compose** (это ключ в `services:`, не `container_name`). `my-app:3000`
 **Цена:**
 - Изоляция исчезает — контейнер видит все хостовые порты, может биндиться на любые.
 - Конфликт портов: два host-network контейнера, желающие порт 8080, не запустятся.
-- Сеть не видна в `docker network inspect`, в диаграммах inventory.
+- Сеть не видна в `docker network inspect` — то есть и в снимке сервера, из которого
+  собирается `networks.md`: контейнер на `host` придётся описывать руками.
 
 **Когда брать (примеры легитимных кейсов):**
 - Контейнер использует UDP-протокол с большим диапазоном эфемерных портов (FRP-туннели,
@@ -403,8 +404,7 @@ NEVER вываливать `internal/DNAT/iptables/socket-proxy` сразу. Э�
   decision tree; pre-check сверяет compose с эталоном.
 - Скилл `/bootstrap-new-server` — опц. шаг 4.1 создаёт canonical сеть `services`, прививая
   паттерн §3 с первой минуты.
-- Скилл `/inventory-scan` — `networks.md` с колонкой `internal` обязательна; диаграмма
-  `services-network.mmd` визуализирует §3.
+- Скилл `/inventory-scan` — `networks.md` с колонкой `internal` обязательна.
 - Скилл `/install-monitoring-stack` — документированные исключения `network_mode: host`
   для Beszel/Diun (§6).
 - Скилл `/cleanup-existing-server`, `.claude/skills/cleanup-existing-server/references/typical-grabli.md` §10 — частный случай §5.1.

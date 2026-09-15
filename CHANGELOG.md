@@ -4,6 +4,38 @@
 версии — по [SemVer](https://semver.org/lang/ru/). Версия мозга — в файле `VERSION`,
 релизы помечены git-тегами `vX.Y.Z`.
 
+## [Unreleased]
+
+Ревизия слоя `_reference` VPN-знаний от 11.08.2026 и рефлекс, найденный по её ходу.
+Прежние версии этих файлов датированы 17–28.05.2026 — при TTL слоя 60 дней (ADR-0006)
+они были просрочены с конца июля. Ревизия и рефлекс — @ostrovskid.
+
+### Добавлено
+
+- **Рефлекс 3.8.13 — обновил ядро Xray → проверяю `minClientVer` в Reality-инбаундах.**
+  С `v26.7.11` (11.07.2026) пустое поле больше не значит «принимаю любого»: сервер
+  подставляет порог `26.3.27`, и клиент на ядре старее порога уходит в REALITY-fallback —
+  рукопожатие проходит, полезного трафика ноль, снаружи похоже на «панель сломалась».
+  Лечение — выставить поле явно, правка живого инбаунда — Yellow. Ядро §3.8 (счётчик
+  якорей 11 → 12) + полная формулировка в `vpn-reflexes.md`; разбор — `transports.md` §13.5.
+
+### Изменено
+
+- **VPN-знания `_reference` — 11 файлов, `last_researched: 2026-08-11`:**
+  - `transports.md` — `minClientVer` отбивает старые клиенты, `allowInsecure` удалён;
+  - `vpn-protocols.md` — AmneziaWG 2.0 сломан, Reality нестабилен с июня 2026;
+  - `fronting-strategies.md` — отпечаток chrome среди подозрительных, заморозка по поведению;
+  - `client-apps.md` — Happ вернулся в RU App Store, sing-box-vt снят; версия ядра внутри
+    Happ различается по платформам;
+  - `routing-on-device-singbox.md` — версии ядра и клиентов, семантика `rule_set`;
+  - `routing-on-device-xray.md` — родной TUN вместо tun2socks, `process` на macOS;
+  - `subscription-mirroring.md` — профили привязаны к подписке, User-Agent 5.x;
+  - `vpn-consultation-flow.md` — ТСПУ на внутреннем маршруте, волна блокировок августа;
+  - `web-and-vpn-coexistence.md` — `trustedXForwardedFor`, live apply в 3X-UI;
+  - `xray-mac-chain.md` — прокси Claude Code через `settings.json`;
+  - `server-networks-defaults.md` — срок свежести продлён (содержание не менялось),
+    убраны пережитки отменённых диаграмм (ADR-0019).
+
 ## [2.12.2] — 2026-08-28
 
 Разбор PR #13 и issue #14 от @ostrovskid: обе находки — про среду, где мозг работает,

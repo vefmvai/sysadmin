@@ -1,12 +1,17 @@
 ---
 knowledge_domain: vpn
 layer: reference
-last_researched: 2026-05-22
+last_researched: 2026-08-11
 ttl_days: 60
 sources_checked:
   - https://xtls.github.io/config/outbound/sockopt.html#dialerproxy
   - https://github.com/anthropics/claude-code/issues/3387
   - https://www.privoxy.org/user-manual/config.html
+  - https://code.claude.com/docs/en/network-config
+  - https://github.com/SagerNet/sing-box/issues/1562
+  - https://github.com/SagerNet/sing-box/issues/3205
+  - https://xtls.github.io/en/config/transports/grpc.html
+  - https://github.com/MHSanaei/3x-ui/issues/5143
   - практический опыт настройки (2026-05-22)
 ---
 
@@ -44,8 +49,16 @@ api.anthropic.com / интернет
 ## Почему именно xray, а не sing-box
 
 sing-box НЕ поддерживает chain VLESS→VLESS через `detour`. Issue закрыт как
-"not planned" (SagerNet/sing-box#1562). Работает только detour с Shadowsocks,
-Trojan или SOCKS.
+"not planned" (SagerNet/sing-box#3205 «Detour doesnt work on outbound protocols»;
+не путать с #1562 — тот про WireGuard и к цепочкам отношения не имеет). Работает
+только detour с Shadowsocks, Trojan или SOCKS.
+
+Оговорка про этот список: #3205 подтверждает его не полностью — в самом issue
+речь о падении связки VLESS→Trojan, тогда как здесь Trojan назван рабочим
+транспортом detour. Перечень рабочих транзитов в issue другой: detour между
+outbound-протоколами работает только через SOCKS, HTTP и SSH — Shadowsocks в
+этом перечне не назван. Значит, и Shadowsocks, и Trojan — проверять на своём
+стенде, прежде чем на них закладываться.
 
 xray поддерживает произвольные chain через `sockopt.dialerProxy` — outbound
 указывает имя другого outbound как транзитный. Работает для любых протоколов.
@@ -69,6 +82,17 @@ Routing: RU-домены и RU-IP → direct, остальное → второ�
 Важно: chain поддерживает не всякая серия узлов провайдера — нужна на gRPC-транспорте. Серии на XTLS-Vision
 НЕ работают как transit в dialerProxy.
 
+> **Транспорт помечен к удалению.** Xray-core при старте пишет в лог, что
+> gRPC-транспорт устарел, не рекомендуется к использованию и может быть удалён, и
+> советует переходить на XHTTP stream-up H2. Предупреждение наблюдалось на сборках
+> ядра 26.4.25 (лог в issue MHSanaei/3x-ui#4989) и 26.6.1 (MHSanaei/3x-ui#5143).
+> Та же рекомендация — в официальной документации транспорта (xtls.github.io,
+> `config/transports/grpc`), блок DANGER «It is recommended to switch to XHTTP».
+> Сегодня gRPC-транзит работает, но вся цепочка стоит на уходящем транспорте: при
+> выборе новой серии узлов у провайдера смотреть в сторону XHTTP и отдельно
+> проверять, годится ли она как transit в `dialerProxy` — своей проверки на
+> XHTTP-транзите у нас нет.
+
 ### 2. privoxy (`/opt/homebrew/etc/privoxy/config`)
 
 ```
@@ -86,8 +110,24 @@ launchctl setenv HTTPS_PROXY http://127.0.0.1:8118
 launchctl setenv HTTP_PROXY  http://127.0.0.1:8118
 ```
 
-macOS GUI-приложения (VSCode) не наследуют shell environment. Единственный
-способ передать proxy — `launchctl setenv` + перезапуск приложения.
+macOS GUI-приложения (VSCode) не наследуют shell environment. Для самого VSCode
+способ передать proxy один — `launchctl setenv` + перезапуск приложения.
+
+Для Claude Code launchctl закрывает не все случаи: двум классам сессий — фоновым
+и Desktop-managed — его мало. Те же переменные задаются в блоке `env` файла
+`~/.claude/settings.json` — сам блок существует давно, новое здесь другое
+(сверено по code.claude.com/docs/en/network-config, 11.08.2026):
+
+- **Фоновые сессии** (`claude agents`, `--bg`) запускает супервизор вне терминала,
+  и окружение шелла до него может вообще не дойти; документация называет
+  настройки единственной конфигурацией, которая доходит до каждой фоновой сессии
+  на каждой машине. Для оператора это главный аргумент: обычные сессии из VSCode
+  и CLI переменную из launchctl подхватывают, фоновые — нет.
+- **С v2.1.217 (21.07.2026)** в сессиях, где соединением управляет приложение
+  Claude Desktop, Claude Code читает `HTTP_PROXY`, `HTTPS_PROXY` и `NO_PROXY`
+  только из managed settings и `~/.claude/settings.json` — значение из launchctl
+  туда не доедет. Класс сессий узкий, у оператора (VSCode + CLI) не срабатывает,
+  но помнить стоит.
 
 ### 4. Перезапуск VSCode
 
@@ -145,7 +185,8 @@ VSCode кеширует env при запуске. После `launchctl setenv`
 ### Прямое прописывание proxy в VSCode settings.json
 
 - `http.proxy` в settings.json НЕ влияет на Claude Code API calls
-- Claude Code использует undici напрямую, только env vars HTTP(S)_PROXY работают
+- Claude Code использует undici напрямую: proxy он берёт из env vars HTTP(S)_PROXY,
+  а в Desktop-managed сессиях — только из настроек (см. раздел 3)
 - `http.proxySupport: "on"` тоже бесполезен для этого случая
 
 ---

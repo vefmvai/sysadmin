@@ -1,14 +1,18 @@
 ---
 knowledge_domain: vpn
 layer: reference
-last_researched: 2026-05-17
+last_researched: 2026-08-11
 ttl_days: 60
 sources_checked:
   - https://xtls.github.io/en/config/transport.html
   - https://xtls.github.io/en/config/transports/httpupgrade.html
   - https://xtls.github.io/en/config/transports/mkcp.html
+  - https://xtls.github.io/config/transports/finalmask.html
   - https://xtls.github.io/en/config/features/browser_dialer.html
   - https://github.com/XTLS/Xray-core/releases
+  - https://github.com/XTLS/Xray-core/commit/55956f8d70f0f92e861cea57957f62afffda31d4
+  - https://github.com/XTLS/Xray-core/commit/18b85adb4e288f49a7894351c6e0f2428c0beef6
+  - https://github.com/XTLS/Xray-core/commit/af7eb68028732a8ee3c0e5d6ab2b8a657bb2e770
   - https://github.com/XTLS/Xray-core/discussions/2950
   - https://github.com/XTLS/Xray-core/discussions/3518
   - https://github.com/XTLS/Xray-core/discussions/3638
@@ -22,7 +26,11 @@ sources_checked:
   - https://github.com/XTLS/Xray-core/issues/5923
   - https://github.com/XTLS/Xray-core/issues/6048
   - https://github.com/XTLS/Xray-core/issues/6085
+  - https://github.com/XTLS/Xray-core/issues/6482
   - https://github.com/XTLS/Xray-core/pull/451
+  - https://github.com/XTLS/Xray-core/pull/6201
+  - https://github.com/XTLS/Xray-core/pull/6210
+  - https://github.com/XTLS/Xray-core/pull/6303
   - https://github.com/XTLS/REALITY/blob/main/README.en.md
   - https://github.com/XTLS/Xray-examples/blob/main/VLESS-TCP-XTLS-Vision-REALITY/config_server.jsonc
   - https://sing-box.sagernet.org/configuration/outbound/anytls/
@@ -132,10 +140,28 @@ release-notes на newreleases.io.
 
 ### 3.3 XMUX параметры
 
-`maxConcurrency`, `hMaxRequestTimes`, `hMaxReusableSecs`, `UplinkDataPlacement`
-(`auto` | `body` | `cookie` | `header` — **только при `mode: packet-up`**).
+Поля XMUX: `maxConcurrency`, `maxConnections`, `cMaxReuseTimes`,
+`hMaxRequestTimes`, `hMaxReusableSecs`, `hKeepAlivePeriod`. Отдельно от XMUX —
+`UplinkDataPlacement` (`auto` | `body` | `cookie` | `header` — **только при
+`mode: packet-up`**): это поле самого XHTTP, а не XMUX.
 
-Источник: [Xray-core discussion #6040](https://github.com/XTLS/Xray-core/discussions/6040).
+С **`v26.6.27`** (27.06.2026) дефолт XMUX сменился с `maxConcurrency: 1` на
+`maxConnections: 6` — мотивировка коммита дословно «for anti-RKN», объяснения
+разработчик не приложил. В **`v26.7.28`** (28.07.2026) дефолт снижен ещё раз — до
+`maxConnections: 3` («for anti-TSPU»), это актуальное значение; шестёрка —
+промежуточное значение ветки `v26.6.27` и действовала в релизах между 27.06 и
+28.07.2026. Сопутствующие дефолты того же коммита `v26.6.27`:
+`hMaxRequestTimes: 600-900`, `hMaxReusableSecs: 1800-3000`. На конфигах с явно
+выставленным `maxConcurrency` дефолт не применяется — значение стоит пересмотреть
+вручную.
+
+Переименование: в **`v26.6.22`** (22.06.2026) XHTTP-поля `session*` стали
+`sessionID*` (`sessionIDPlacement`, `sessionIDKey`), добавлены `sessionIDTable`
+и `sessionIDLength`.
+
+Источники: [Xray-core discussion #6040](https://github.com/XTLS/Xray-core/discussions/6040),
+[коммит 18b85ad](https://github.com/XTLS/Xray-core/commit/18b85adb4e288f49a7894351c6e0f2428c0beef6),
+[release-notes Xray-core](https://github.com/XTLS/Xray-core/releases).
 
 ### 3.4 Зачем XHTTP создан (предполагаемая мотивация)
 
@@ -161,6 +187,13 @@ release-notes на newreleases.io.
 | **#6085** | v26.5.3, v26.4.25 | ⚠️ **НЕ подтверждён.** Заявлен `bad certificate` при XHTTP, когда TLS терминирует **сам xray** (`security: tls`, .pem от Let's Encrypt). Закрыт `not_planned` 2026-05-08 с «close as no response» — данных для повтора автор не дал, майнтейнер указал на **сам сертификат**. Схемы «XHTTP за nginx» (`security: none`, TLS держит nginx) не касается. Сверено с первоисточником 2026-08-05 | **Откат версии НЕ нужен** — багом это не подтверждено. Столкнулся в режиме xray-TLS: сверить отпечаток сертификата `xray tls ping <dest>`, при совпадении — прописать его в `pinnedPeerCertSha256` |
 | **#5739** | — | Browser Dialer игнорирует `sessionId` и `seqStr` в `packet-up` | Не используется в продакшне |
 | **#2997** | — | Host header регистрозависим; нельзя добавить header key `"host"` | Использовать `Host` (с большой H) |
+
+⚠️ **Имена полей в строках #5631 и #5739 — дорениеймовые.** Строки описывают
+состояние до переименования (баги привязаны к `v26.1.31` и старше) и потому
+оставлены как есть, но с **`v26.6.22`** XHTTP-поля `session*` называются
+`sessionID*` (см. §3.3): `sessionPlacement` из #5631 на свежем ядре —
+`sessionIDPlacement`. Точное соответствие для `sessionId` из #5739 по
+источникам не сверено — на свежем ядре искать его среди `sessionID*`-полей.
 
 ### 3.6 Клиентская поддержка XHTTP
 
@@ -229,6 +262,15 @@ HTTP/2-based RPC. Поддерживается Xray и sing-box. Cloudflare CDN 
 
 В РФ-2026 — работает, но активно мониторится. Под TLS 1.3 — попадает под curtain.
 
+⚠️ **Само ядро считает транспорт устаревшим.** Xray-core 26.x при старте пишет в
+лог, что gRPC-транспорт устарел, не рекомендуется к использованию и может быть
+удалён, и советует переходить на XHTTP в режиме `stream-up` (H2). То же говорит
+официальная документация транспорта: страница `grpc.html` держит блок DANGER
+«It is recommended to switch to XHTTP». **Это не новость и не «что изменилось»** —
+предупреждение существует давно: наблюдалось в логах сборок `26.4.25` (issue
+MHSanaei/3x-ui #4989) и `26.6.1` (issue #5143 там же). Т.е. gRPC разработчиками
+рассматривается как уходящий транспорт, а не как целевой выбор.
+
 ---
 
 ## §7 mKCP
@@ -246,7 +288,30 @@ HIGH: [xtls.github.io/mkcp](https://xtls.github.io/en/config/transports/mkcp.htm
 
 То есть в 2026 mKCP-конфиги **сломались для тех, кто обновился до новой версии
 Xray** — параметры `header` и `seed` мигрированы в новую секцию `finalmask/udp`.
-Для legacy-серверов нужен `mkcp-original` в FinalMask.
+Для legacy-серверов в FinalMask нужен тип **`mkcp-legacy`** (секция
+`finalmask.udp`, параметры `header` и `value`): с **`v26.6.1`** (01.06.2026,
+[PR #6201](https://github.com/XTLS/Xray-core/pull/6201)) он заменил собой все
+прежние `mkcp-*` и legacy `header-*`. Значения `mkcp-original` в ядре больше нет —
+конфиг с ним не соберётся.
+
+```jsonc
+"finalmask": {
+  "udp": [
+    { "type": "mkcp-legacy", "settings": { "header": "dns", "value": "" } }
+  ]
+}
+```
+
+⚠️ Процитированная выше страница `xtls.github.io/.../mkcp.html` **до сих пор
+содержит устаревшее `mkcp-original`** — это ошибка официальной документации, а не
+нашей записи. При следующей сверке не откатывать правку обратно по mkcp.html:
+проверять по коду ядра или по странице
+[FinalMask](https://xtls.github.io/config/transports/finalmask.html).
+
+Типы FinalMask в ядре `v26.7.28`: UDP — `header-custom`, `mkcp-legacy`, `noise`,
+`salamander`, `sudoku`, `xdns`, `xicmp`, `realm`; TCP — `header-custom`,
+`fragment`, `sudoku`, `xmc` (маска под Minecraft, добавлена 11.07.2026,
+[PR #6210](https://github.com/XTLS/Xray-core/pull/6210)).
 
 ### 7.2 mKCP в 2026 — статус
 
@@ -424,7 +489,9 @@ Plugin-chain: SS-server → v2ray-plugin → реальный TCP-сокет.
 
 **Практический совет:** для REALITY+Vision-сервера — используйте Xray-клиентов
 (FoxRay, v2rayN, v2rayNG). Для REALITY без Vision — sing-box работает (Hiddify,
-Karing).
+Karing). ⚠️ Оговорка про версию сервера: на ядре ≥ `v26.7.11` REALITY-сервер с
+пустым `minClientVer` отбивает как раз эти клиенты (fallback на `dest`, 0 байт
+полезного трафика) — условие рабочей связки и лечение см. в §13.5.
 
 ---
 
@@ -453,6 +520,10 @@ HIGH: [XTLS/REALITY README](https://github.com/XTLS/REALITY/blob/main/README.en.
 Параметр `fingerprint`, default = `"chrome"`. Опции: `"chrome"`, `"firefox"`,
 `"safari"`, `"random"` / `"randomized"`.
 
+⚠️ **Дефолт `chrome` для РФ нейтральным не считается.** С июня 2026 `chrome`
+отнесён к подозрительным для РФ, рабочими названы `firefox` и `edge` — основания
+и разбор в `_reference/fronting-strategies.md` §6.
+
 **Известный баг:** `chrome_pq` fingerprint **НЕ работает** с VLESS+XTLS-REALITY
 (sing-box #2084, Xray-core #4852). Работают: `chrome`, `firefox`, `edge`.
 
@@ -466,17 +537,43 @@ HIGH: [XTLS/REALITY README](https://github.com/XTLS/REALITY/blob/main/README.en.
 
 - ≥ **`v1.6.3`** — REALITY впервые попал в Xray
 - ≥ **`v1.8.0`** — REALITY стабилен
-- 🟡 **June 1, 2026 UTC** — scheduled disable `allowInsecure: true`. Конфиги с
-  этим полем без миграции перестанут работать в новых релизах. Migration window
-  открыт.
+- 🔴 **`v26.6.22`** (22.06.2026) — `allowInsecure` **удалён**, а не «запланирован
+  к отключению»: временная развилка «после 2026-06-01» выпилена из кода, конфиг с
+  этим полем больше не собирается и Xray не стартует (ошибка removed feature).
+  Тем же коммитом удалены `verifyPeerCertInNames` и `echForceQuery`. Замена —
+  `pinnedPeerCertSha256` (pcs) и `verifyPeerCertByName` (vcn). Migration window
+  закрыт
+  ([коммит 55956f8](https://github.com/XTLS/Xray-core/commit/55956f8d70f0f92e861cea57957f62afffda31d4)).
+- 🔴 **`v26.7.11`** (11.07.2026) — REALITY-сервер при **пустом** `minClientVer`
+  подставляет жёсткий дефолт `26.3.27`. Клиенты на более старых ядрах (sing-box
+  1.12.x и построенные на нём Hiddify/Karing/Happ, mihomo, Shadowrocket) уходят
+  в fallback на `dest`: рукопожатие TLS проходит, полезного трафика 0 байт.
+  Симптом легко спутать со «сломанной панелью». **Две зацепки для диагностики:**
+  на клиенте это обычно выглядит как `authentication failed`, а не как полная
+  тишина; на сервере при старте ядро пишет предупреждение
+  `REALITY: The default minimal client version is Xray-core v26.3.27, other
+  clients may be refused to connect`. Лечение без отката ядра — вписать в
+  `realitySettings` инбаунда `"minClientVer": "1.0.0"` (в 3X-UI — поле «Min
+  Client Ver»); именно это значение советует мейнтейнер в
+  [issue #6482](https://github.com/XTLS/Xray-core/issues/6482). Ядро при этом
+  предупреждает, что ручная правка `minClientVer` повышает риск блокировки IP —
+  в коммите это помечено как «change it at your own risk». Проверять при каждом
+  обновлении ядра на панели
+  ([коммит af7eb68](https://github.com/XTLS/Xray-core/commit/af7eb68028732a8ee3c0e5d6ab2b8a657bb2e770)).
 
 ### 13.6 Рекомендуемая комбинация для РФ-2026
 
 ```
-VLESS + TCP + REALITY + xtls-rprx-vision + uTLS(chrome или firefox)
+VLESS + TCP + REALITY + xtls-rprx-vision + uTLS(firefox или edge)
 ```
 
 С dest = `www.microsoft.com` или `github.com` (без CDN в РФ).
+
+⚠️ Отпечаток в этой строке изменён 2026-08-11: раньше здесь стоял «chrome или
+firefox». С июня 2026 `chrome` (вместе с `safari` и `ios`) отнесён к подозрительным
+для РФ, проходящими названы `firefox`, `edge` и Android OkHttp — разбор и источник
+в `_reference/fronting-strategies.md` §6. Отпечаток подбирают под текущий фронт,
+а не фиксируют в шаблоне навсегда.
 
 Источник: [Xray-core discussion #3518](https://github.com/XTLS/Xray-core/discussions/3518),
 [Xray-examples](https://github.com/XTLS/Xray-examples/blob/main/VLESS-TCP-XTLS-Vision-REALITY/config_server.jsonc).
@@ -491,15 +588,28 @@ VLESS + TCP + REALITY + xtls-rprx-vision + uTLS(chrome или firefox)
 │   ├── Нужен максимум защиты от 16-KB curtain → XHTTP за реальным Nginx с TLS 1.2
 │   │   └── НО: клиенты только Xray (FoxRay, v2rayN, v2rayNG); НЕ Hiddify/Karing
 │   ├── Нужна универсальность по клиентам → VLESS+TCP+REALITY+Vision
-│   │   └── Работает на Hiddify/Karing (через sing-box REALITY без Vision) и Xray-клиентах
+│   │   ├── Работает на Hiddify/Karing (через sing-box REALITY без Vision) и Xray-клиентах
+│   │   └── НО: на ядре ≥ v26.7.11 пустой minClientVer отбивает эти клиенты — см. §13.5
 │   └── Нужна мобильная батарея + UDP-устойчивость → Hysteria2 с masquerade
 │       └── UDP — риск блокировки в РФ-2026
 ├── Цель — multi-hop через свой RU-VPS
 │   ├── RU-VPS → загр.VPS outbound: VLESS+Reality или SS2022 (DC-to-DC режется мягче)
-│   └── Клиент → RU-VPS: внутри РФ, маскировка не нужна — голый VLESS-TCP
+│   └── Клиент → RU-VPS: внутри РФ, маскировка не нужна — голый VLESS-TCP (*)
 └── Цель — CDN-fronting (за Cloudflare Workers)
     └── WebSocket — единственный совместимый транспорт
 ```
+
+**(*) Оговорка про голый VLESS-TCP.** С Xray-core **`v26.7.11`** (11.07.2026)
+запрещены незашифрованные **outbound** VLESS и Trojan на публичный адрес: если у
+outbound нет TLS/REALITY, а у VLESS `encryption` пуст или `none`, конфиг не
+собирается — «vless without TLS or other encryption is prohibited unless the
+server address is a private IP or domain»
+([PR #6303](https://github.com/XTLS/Xray-core/pull/6303)). Проверка стоит
+**только на outbound**: голый VLESS-TCP **inbound** на самом RU-VPS (то, что
+настраивает 3X-UI) ею не затронут, и клиенты не на Xray-ядре (sing-box, Happ на
+sing-box, mihomo) под неё не подпадают. Итог: связка «клиент → RU-VPS голым
+VLESS-TCP» остаётся рабочей, пока клиент не на Xray; для Xray-клиента и для
+Xray-outbound с RU-VPS нужен TLS/REALITY либо VLESS `encryption`.
 
 Подробнее по fronting-стратегиям — `_reference/fronting-strategies.md`.
 
