@@ -54,7 +54,7 @@ STALE="$TMP/stale.jsonl"
 RED_SAMPLE='docker volume rm pgdata-old'
 
 run() { # $1 = команда, $2 = transcript_path (может быть пустым)
-  python3 - "$1" "${2:-}" <<'PY' | env PYTHONIOENCODING="${HOOK_ENC:-utf-8}" bash "$HOOK"
+  python3 - "$1" "${2:-}" <<'PY' | env PYTHONIOENCODING="${HOOK_ENC:-utf-8}" RED_GUARD_BUDGET="${HOOK_BUDGET_ENV:-}" bash "$HOOK"
 import json, sys
 print(json.dumps({
   "session_id": "test-session",
@@ -224,6 +224,101 @@ else
   FAIL=$((FAIL+1)); echo "  ❌ отказ при cp1252 пуст или искажён"
 fi
 unset HOOK_ENC
+
+echo "[8] Замок укладывается в своё время сам (разбор 26.09.2026)"
+# Дефект: разбор сегментов порождал ~15 процессов на сегмент, в Git Bash на Windows замок
+# тратил 17–60 с на обычную команду при таймауте движка 15 с. Прерванный хук движок читает
+# как «разрешаю» — за 18–26.09 на одной машине 99 команд прошли без вердикта, одна из них
+# с `rm -rf` по пути в переменной. На быстрой машине старый код укладывался бы в срок,
+# поэтому главный ассерт — по ТЕКСТУ цикла (правило 3г свода замков), а не по секундомеру.
+ok()  { PASS=$((PASS+1)); printf '  ✅ %s\n' "$1"; }
+bad() { FAIL=$((FAIL+1)); printf '  ❌ %s\n' "$1"; }
+
+LOOP="$(sed -n '/^# ── НАЧАЛО РАЗБОРА СЕГМЕНТОВ/,/^# ── КОНЕЦ РАЗБОРА СЕГМЕНТОВ/p' "$HOOK" \
+        | grep -v '^[[:space:]]*#' | sed 's/[[:space:]]#.*$//')"
+if [ -z "$LOOP" ] || ! printf '%s' "$LOOP" | grep -q 'RED_PATTERNS'; then
+  bad "цикл разбора сегментов не найден по маркерам — проверять нечего (контроль непустоты)"
+elif printf '%s' "$LOOP" | grep -Eq '\$\(|`|(^|[^|])\|[^|]|(^|[^a-z_])(grep|egrep|sed|awk|tr|cut|python3?|perl)([[:space:]]|$)'; then
+  bad "в цикле по сегментам порождаются процессы — на Windows это десятки секунд:
+$(printf '%s' "$LOOP" | grep -En '\$\(|`|(^|[^|])\|[^|]|(^|[^a-z_])(grep|egrep|sed|awk|tr|cut|python3?|perl)([[:space:]]|$)' | head -3)"
+else
+  ok "в цикле по сегментам ни одного порождённого процесса"
+fi
+
+# Контракт с настройками: таймаут движка обязан быть больше собственного бюджета хука,
+# иначе хук не успеет отказать сам и движок его оборвёт — то есть пропустит команду.
+BUDGET="$(grep -Eo '^HOOK_BUDGET=[0-9]+' "$HOOK" | cut -d= -f2)"
+SETTINGS="$(cd "$(dirname "$0")/../.." && pwd)/settings.json"
+ENGINE_TO="$(python3 - "$SETTINGS" <<'PY' 2>/dev/null
+import json, sys
+d = json.load(open(sys.argv[1], encoding="utf-8"))
+for m in d.get("hooks", {}).get("PreToolUse", []):
+    for h in m.get("hooks", []):
+        if "red-zone-guard.sh" in h.get("command", ""):
+            print(h.get("timeout", 60))
+PY
+)"
+if [ -z "$BUDGET" ] || [ -z "$ENGINE_TO" ]; then
+  bad "не прочитал бюджет хука (${BUDGET:-нет}) или таймаут движка (${ENGINE_TO:-нет})"
+elif [ "$ENGINE_TO" -gt "$BUDGET" ]; then
+  ok "таймаут движка ${ENGINE_TO} с больше бюджета хука ${BUDGET} с"
+else
+  bad "таймаут движка ${ENGINE_TO} с не больше бюджета хука ${BUDGET} с — движок оборвёт хук раньше отказа"
+fi
+
+# Каждое правило обязано компилироваться встроенным разбором bash: несобранный шаблон
+# даёт код 2, `if [[ … ]]` читает его как «не совпало» — правило молчит, замок цел на вид.
+PATTERNS_SRC="$(sed -n '/^RED_PATTERNS=(/,/^)/p' "$HOOK")"
+eval "$PATTERNS_SRC"
+broken=""
+for re in "${RED_PATTERNS[@]}" \
+          "$(grep -Eo "^SAFE_RM_RE='[^']+'" "$HOOK" | sed "s/^SAFE_RM_RE='//; s/'\$//")"; do
+  [[ "probe" =~ $re ]]; [ $? -eq 2 ] && broken="${broken} ${re}"
+done
+if [ "${#RED_PATTERNS[@]}" -lt 5 ]; then bad "правил прочитано подозрительно мало: ${#RED_PATTERNS[@]}"
+elif [ -n "$broken" ]; then bad "не компилируются в bash =~:${broken}"
+else ok "все ${#RED_PATTERNS[@]} правил и исключение компилируются в bash =~"; fi
+
+# Своя ветка отказа по времени: бюджет 0 — отказ даже на безобидной команде.
+HOOK_BUDGET_ENV=0
+OUT="$(run 'ls -la' 2>/dev/null)"
+if printf '%s' "$OUT" | grep -q '"deny"' && printf '%s' "$OUT" | grep -q 'НЕ УСПЕЛ'; then
+  ok "бюджет исчерпан — отказ, а не молчаливый пропуск"
+else
+  bad "при исчерпанном бюджете замок не отказал: ${OUT:0:120}"
+fi
+unset HOOK_BUDGET_ENV
+
+# Длинные команды — форма, на которой замок и прерывался. Числа сегментов хватает, чтобы
+# старый код на Windows работал минутами; новый обязан уложиться в свой бюджет.
+LONG_OK="$(for i in $(seq 1 400); do printf 'ls /tmp/d%d | wc -l; ' "$i"; done)"
+LONG_RED="${LONG_OK} docker volume rm pgdata"
+# Форма команды, прошедшей без вердикта 26.09 (обобщена, без данных оператора): тело
+# heredoc, а за ним ssh с уборкой каталога по пути в переменной — проверить путь нельзя.
+SHAPE="$(cat <<'CMD'
+mkdir -p /tmp/t && cp a /tmp/t/a && cp b /tmp/t/b
+cat > /tmp/t/h.sh <<'EOF'
+cut_fn() { sed -n "/^$2() {/,/^}/p" "$1"; }
+eval "$(cut_fn "$D/new" f)"; echo " new:"; f
+T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
+EOF
+tar -czf - -C /tmp/t . | ssh host 'T=$(mktemp -d); trap "rm -rf $T" EXIT; tar -xzf - -C $T; sudo bash $T/h.sh' 2>&1 | grep -v x
+CMD
+)"
+for spec in "allow|400 сегментов без опасного|LONG_OK" "deny|400 сегментов, опасное в конце|LONG_RED" "deny|форма 26.09: ssh + rm -rf по переменной|SHAPE"; do
+  want="${spec%%|*}"; rest="${spec#*|}"; desc="${rest%%|*}"; var="${rest#*|}"
+  s="$(date +%s%N)"; OUT="$(run "${!var}" 2>/dev/null)"; e="$(date +%s%N)"; ms=$(( (e - s) / 1000000 ))
+  got="allow"; printf '%s' "$OUT" | grep -q '"permissionDecision": *"deny"' && got="deny"
+  if printf '%s' "$OUT" | grep -q 'НЕ УСПЕЛ'; then
+    bad "${desc} — не уложился в бюджет (${ms} мс)"
+  elif [ "$got" != "$want" ]; then
+    bad "${desc} — ожидали ${want}, получили ${got} (${ms} мс)"
+  elif [ "$ms" -ge $(( ${BUDGET:-10} * 1000 )) ]; then
+    bad "${desc} — ${ms} мс, дольше бюджета ${BUDGET:-10} с"
+  else
+    ok "${desc} — ${got}, ${ms} мс"
+  fi
+done
 
 echo "─────────────────────────────────────────────────────────"
 printf 'Итог: %d прошло, %d провалено\n' "$PASS" "$FAIL"
