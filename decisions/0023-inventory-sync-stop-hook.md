@@ -25,7 +25,14 @@ inventory-документ маршрутизации.
 
 - **были ли команды, меняющие инфраструктуру** — `docker compose up/down/restart`, работа с
   сетями и томами, `systemctl restart/enable/…`, `nginx -s reload`, `certbot`/`acme.sh`,
-  `ufw allow/deny`, `crontab`, симлинк в `sites-enabled`, правка конфигов через `tee`/`sed -i`;
+  `ufw allow/deny/default/enable…`, `crontab` (кроме просмотра `crontab -l`; уточнено 2026-09-25 —
+  голое слово останавливало диагностику), симлинк в `sites-enabled`, учётные записи,
+  `hostnamectl set-…`, запуск обёрток выкатки (имя со словом deploy/update) и **запись файла в
+  настройки сервера любым способом** (`>`, `tee`, `cp`/`install`/`rsync`/`scp`, `sed -i`, `dd`,
+  `tar -x`, `curl -o`… в `/etc`, `/opt`, `/srv`, `/var/www`, `/usr/local`, юниты, скрытые файлы
+  root и пользователей; `.env` и compose — в любом серверном каталоге), перенос и удаление
+  настроек, `git`, меняющий рабочую копию на сервере (расширено 2026-09-25; полный перечень и
+  граница — в шапке хука);
 - **обновлялся ли inventory** — правка файлов по пути `inventory/`, либо пересборка снимка
   (`dump-snapshot`) или дашборда (`refresh.sh`).
 
