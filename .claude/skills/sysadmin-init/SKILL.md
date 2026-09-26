@@ -270,8 +270,11 @@ NAME="$NAME" LANG="$LANG" TIMEZONE="$TIMEZONE" MANAGER="$MANAGER" \
   ${MANAGER_NAME:+MANAGER_NAME="$MANAGER_NAME" CLI_AVAILABLE="$CLI_AVAILABLE"} \
   ${MON_ENABLED:+MON_ENABLED=true MON_STACK_JSON="$MON_STACK_JSON" MON_PANEL_DOMAIN="$MON_PANEL_DOMAIN"} \
   ${BACKUPS_ENABLED:+BACKUPS_ENABLED=true BACKUPS_DESTINATION="$BACKUPS_DESTINATION" BACKUPS_RETENTION_JSON="$BACKUPS_RETENTION_JSON" BACKUPS_RCLONE_REMOTE="$BACKUPS_RCLONE_REMOTE"} \
+  ${BACKUPS_SFTP_HOST:+BACKUPS_SFTP_HOST="$BACKUPS_SFTP_HOST" BACKUPS_SFTP_PATH="$BACKUPS_SFTP_PATH"} \
+  ${BACKUPS_SFTP_USER:+BACKUPS_SFTP_USER="$BACKUPS_SFTP_USER"} \
   ${TG_ENABLED:+TG_ENABLED=true TG_BOT_USERNAME="$TG_BOT_USERNAME" TG_CHAT_TYPE="$TG_CHAT_TYPE"} \
   ${VPN_ENABLED:+VPN_ENABLED=true} \
+  ${BRAIN_EXISTS:+AGENT_CURRENT="$BRAIN_PATH"} ${INFRA_EXISTS:+INFRA_CURRENT="$INFRA_CONFIG_PATH"} \
   bash "$SYSADMIN_ROOT/.claude/skills/sysadmin-init/scripts/assemble-configs.sh" "$WORKDIR" "$SYSADMIN_ROOT"
 # draft'ы лежат тут (используются Шагами 9–10):
 AGENT_DRAFT="$WORKDIR/agent-config-draft.json"; INFRA_DRAFT="$WORKDIR/infra-config-draft.json"
@@ -282,8 +285,14 @@ AGENT_DRAFT="$WORKDIR/agent-config-draft.json"; INFRA_DRAFT="$WORKDIR/infra-conf
 — JSON-ОБЪЕКТ** `{"daily":7,"weekly":4,"monthly":6}` (не строка `7d-4w-6m`!), `MON_STACK_JSON`
 — JSON-массив из enum. Скрипт убирает агент-поля из карты (страховка ADR-0013) и валится с
 понятной ошибкой при нехватке обязательной переменной (не пишет молча битый draft).
-**Блок `meta`** остаётся из skeleton (`onboarding_completed:false`); в `--reconfigure` `meta`
-и уже выставленные VPN-поля (`panel_url`, `panel_web_base_path`) НЕ затираются.
+**Два режима сборки (ADR-0042).** Есть живой конфиг — передай его путь (`AGENT_CURRENT`,
+`INFRA_CURRENT`), и он станет БАЗОЙ draft'а: переменные перекроют только заданные поля,
+всё прочее — включая блоки, которых скилл не знает (`state`, `map`), лишние записи в
+`projects[]`/`servers[]`, `meta`, `vpn` — переедет как есть. Без этих путей сборка идёт от
+пустого skeleton (первичная настройка), и тогда обязательны все переменные контракта.
+**Не передал `*_CURRENT` при существующем конфиге — устроил потерю данных:** до 2026-09-24
+так и было, `--reconfigure` пересобирал файл с нуля. Сохранность проверяется тестом
+`scripts/test-assemble-configs.sh` (прогнать после любой правки сборщика).
 
 ## Шаг 9: Валидация перед сохранением (ОБА файла)
 
@@ -447,9 +456,12 @@ jq -r '.servers[0].role' "$INFRA_CONFIG_PATH" # пример инфра-поля
 ```
 
 После всех раундов — Шаги 8→9→10 (+10.6 самопроверка обязательна и здесь: после правок
-оба конфига должны остаться рабочими). **НЕ затираю:** блок `meta` мозга и уже выставленные
-VPN-поля (`panel_url`, `panel_web_base_path` — их заполняют VPN-скиллы) — переношу текущие
-значения в draft перед записью.
+оба конфига должны остаться рабочими). **Сохранность непрошенного держит КОД, а не эта
+строка:** на Шаге 8 в сборщик передаются `AGENT_CURRENT`/`INFRA_CURRENT`, и базой draft'а
+становится живой файл. Раньше здесь стояло обещание «`meta` и VPN-поля не затираю», за
+которым не было ни строчки кода, — оно исполнялось, только если агент вспоминал сделать это
+руками (аудит 2026-09-24). **Спрашивай только то, что оператор пришёл менять**; молчание по
+остальным раундам теперь означает «оставить как было», а не «выключено».
 
 # Граничные случаи и грабли
 

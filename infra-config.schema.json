@@ -112,13 +112,36 @@
         },
         "destination": {
           "type": "string",
-          "enum": ["yandex-disk-webdav", "nextcloud-webdav", "owncloud-webdav", "s3", "b2", "local"],
-          "description": "Куда складываются бэкапы. *-webdav — облачные хранилища через WebDAV (требуют rclone-remote). s3 — Amazon S3 или совместимое. b2 — Backblaze B2. local — локально на сервере (только для тестов!)."
+          "enum": ["yandex-disk-webdav", "nextcloud-webdav", "owncloud-webdav", "s3", "b2", "sftp", "local"],
+          "description": "Куда складываются бэкапы. *-webdav — облачные хранилища через WebDAV (требуют rclone-remote). s3 — Amazon S3 или совместимое. b2 — Backblaze B2. sftp — СВОЙ второй сервер по SSH/SFTP (требует блок sftp; это не offsite — считай, переживёт ли копия беду с площадкой источника). local — локально на сервере (только для тестов!)."
         },
         "rclone_remote": {
           "type": "string",
           "minLength": 1,
           "description": "Имя rclone-remote'а из ~/.config/rclone/rclone.conf (для webdav-destination'ов). Например, yadisk-backup. ОБЯЗАТЕЛЬНО при destination=*-webdav."
+        },
+        "sftp": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["host", "path"],
+          "description": "Приёмник «свой сервер по SFTP» (ОБЯЗАТЕЛЕН при destination=sftp). Форма репозитория restic — sftp:<host>:<path>. Учётка приёмника должна быть заперта (ForceCommand internal-sftp + ChrootDirectory), иначе ключ бэкапа = вход на сервер.",
+          "properties": {
+            "host": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Как сервер-ИСТОЧНИК обращается к приёмнику: алиас из его ~/.ssh/config (предпочтительно — там же ключ, порт, пользователь) либо user@host / host."
+            },
+            "user": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Пользователь на приёмнике, если он не задан ssh-алиасом. Обычно отдельная запертая учётка бэкапа. Уходит в адрес репозитория как user@host."
+            },
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Путь репозитория restic на приёмнике. ВНИМАНИЕ: при ChrootDirectory путь считается ОТ КОРНЯ chroot, а не от корня файловой системы приёмника."
+            }
+          }
         },
         "retention": {
           "type": "object",
@@ -312,6 +335,28 @@
         "properties": {
           "backups": {
             "required": ["enabled", "destination", "retention", "rclone_remote"]
+          }
+        }
+      }
+    },
+    {
+      "description": "Если backups.destination=sftp → обязателен блок sftp (в нём host и path).",
+      "if": {
+        "properties": {
+          "backups": {
+            "properties": {
+              "enabled": { "const": true },
+              "destination": { "const": "sftp" }
+            },
+            "required": ["enabled", "destination"]
+          }
+        },
+        "required": ["backups"]
+      },
+      "then": {
+        "properties": {
+          "backups": {
+            "required": ["enabled", "destination", "retention", "sftp"]
           }
         }
       }

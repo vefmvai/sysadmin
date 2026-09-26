@@ -19,7 +19,16 @@ set -uo pipefail
 CONFIG="${BACKUP_CONFIG:-/root/.backup-env}"
 LOG_FILE="${BACKUP_LOG:-/var/log/backup-cron.log}"
 
-log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] check-backup-age: $*" | tee -a "$LOG_FILE"; }
+# Строка — в журнал ровно один раз: cron-строка скилла уже направляет вывод в этот файл,
+# `tee -a` поверх неё задваивал журнал (разбор 25.09.2026, как в backup-all.sh).
+if [ /dev/stdout -ef "$LOG_FILE" ]; then
+    # В журнал — ПО ИМЕНИ и на дозапись, а не в stdout: stdout может быть открыт без дозаписи
+    # (systemd StandardOutput=file:, `>` вместо `>>` в cron), и тогда метки затирают вывод
+    # restic, который пишет в журнал по имени (проверка 25.09.2026, Linux и Git Bash).
+    log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] check-backup-age: $*" >> "$LOG_FILE"; }
+else
+    log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] check-backup-age: $*" | tee -a "$LOG_FILE"; }
+fi
 
 if [ ! -r "$CONFIG" ]; then
     log "FATAL: $CONFIG не читается"
@@ -40,29 +49,48 @@ set +a
 # Универсальный отправщик алерта по выбранному каналу.
 # Telegram-вариант — наиболее частый кейс для соло-операторов; Slack/email
 # поддерживаются как альтернативы. Канал берётся из inventory/access.md.
+# Отправка тревоги С ПРОВЕРКОЙ ДОСТАВКИ. Раньше вывод curl глушился в /dev/null и код
+# возврата не смотрелся: строка «ALERT: ...» в логе означала «попытались», а не «дошло».
+# Для канала тревог это худший из отказов — сторож молчит ровно тогда, когда нужен
+# (отозвали токен, сменили chat_id, нет сети). Ответ канала разбираем; в лог пишем ТОЛЬКО
+# код ответа, не тело и никогда не токен.
 send_alert() {
-    local msg="$1"
+    local msg="$1" rc=0 code="" body=""
     case "$ALERT_CHANNEL" in
         telegram)
             # ALERT_TOKEN = bot token, ALERT_TARGET = chat_id
-            curl -s -m 20 -X POST "https://api.telegram.org/bot${ALERT_TOKEN}/sendMessage" \
+            body=$(curl -s -m 20 -w '\n%{http_code}' -X POST \
+                "https://api.telegram.org/bot${ALERT_TOKEN}/sendMessage" \
                 -d "chat_id=${ALERT_TARGET}" \
-                -d "text=$(hostname): $msg" > /dev/null
+                -d "text=$(hostname): $msg" 2>/dev/null) || rc=1
+            code=$(printf '%s' "$body" | tail -n1)
+            [ "$code" = "200" ] || rc=1
+            printf '%s' "$body" | grep -q '"ok":true' || rc=1
             ;;
         slack)
             # ALERT_TOKEN = incoming webhook URL, ALERT_TARGET (опционально) = override channel
-            curl -s -m 20 -X POST -H 'Content-Type: application/json' \
+            body=$(curl -s -m 20 -w '\n%{http_code}' -X POST -H 'Content-Type: application/json' \
                 --data "{\"text\":\"$(hostname): $msg\"}" \
-                "$ALERT_TOKEN" > /dev/null
+                "$ALERT_TOKEN" 2>/dev/null) || rc=1
+            code=$(printf '%s' "$body" | tail -n1)
+            [ "$code" = "200" ] || rc=1
             ;;
         email)
             # ALERT_TARGET = email address; mail должен быть настроен на хосте
-            echo "$msg" | mail -s "$(hostname): backup alert" "$ALERT_TARGET"
+            echo "$msg" | mail -s "$(hostname): backup alert" "$ALERT_TARGET" || rc=1
+            code="mail rc=$?"
             ;;
         *)
             # без ALERT_CHANNEL — алерт остаётся только в лог-файле (см. log выше)
+            return 0
             ;;
     esac
+    if [ "$rc" -ne 0 ]; then
+        log "FAIL: тревога НЕ доставлена (канал $ALERT_CHANNEL, ответ: ${code:-нет ответа})"
+    else
+        log "OK: тревога доставлена (канал $ALERT_CHANNEL)"
+    fi
+    return "$rc"
 }
 
 # Получаем timestamp последнего snapshot

@@ -1,12 +1,12 @@
 ---
 name: setup-backups
 description: |
-  Бэкапы с нуля: restic для encrypted snapshots, offsite-хранилище (S3 / B2 / WebDAV —
-  Яндекс.Диск, NextCloud), retention 7+4+6 (daily+weekly+monthly), алерт «бэкап >36 ч»
-  в Telegram/Slack/email, обязательный прогон restore на временный контейнер.
-  Покрывает БД (PostgreSQL, MySQL, Redis dump).
+  Бэкапы с нуля: restic для encrypted snapshots, хранилище — offsite (S3 / B2 / WebDAV —
+  Яндекс.Диск, NextCloud) ИЛИ свой второй сервер по SFTP, retention 7+4+6
+  (daily+weekly+monthly), алерт «бэкап >36 ч» в Telegram/Slack/email, обязательный прогон
+  restore на временный контейнер. Покрывает БД (PostgreSQL, MySQL, Redis dump).
   Триггеры: «нужны бэкапы», «настрой backup», «restic с retention», «offsite на S3/WebDAV/Backblaze»,
-  «без бэкапов нельзя ничего менять».
+  «бэкап на свой второй сервер», «бэкап по SFTP», «без бэкапов нельзя ничего менять».
   НЕ для бэкапа uploads/файлов (это отдельный шаблон); НЕ для setup без настроенного хранилища.
 allowed-tools: Bash, Read, Edit, Write
 ---
@@ -46,7 +46,7 @@ allowed-tools: Bash, Read, Edit, Write
 
 # Шаг 0: Чтение конфига (STRICT)
 
-Скилл — STRICT-режим: без конфига инфры (`infra-config.json`) он не запускается. Конфиг определяет, куда складываются бэкапы (S3 / B2 / WebDAV), какая retention, нужны ли Telegram-алерты и в каком менеджере паролей искать `restic`-passphrase. Без этих решений скилл угадывал бы намерения — это запрещено правилами агента.
+Скилл — STRICT-режим: без конфига инфры (`infra-config.json`) он не запускается. Конфиг определяет, куда складываются бэкапы (S3 / B2 / WebDAV / свой сервер по SFTP), какая retention, нужны ли Telegram-алерты и в каком менеджере паролей искать `restic`-passphrase. Без этих решений скилл угадывал бы намерения — это запрещено правилами агента.
 
 Используй общий helper `_lib/find-config.sh` (единая точка изменения для всех
 STRICT/OPTIONAL скиллов — алгоритм идентичен Cold Start Protocol персоны).
@@ -84,6 +84,10 @@ fi
 # Чтение значений из конфига
 BACKUP_DESTINATION_FROM_CONFIG=$(get_config_field backups.destination)
 RCLONE_REMOTE_FROM_CONFIG=$(get_config_field backups.rclone_remote)
+# Приёмник «свой сервер по SFTP» (destination=sftp): адрес/алиас, путь репозитория, ключ.
+SFTP_HOST_FROM_CONFIG=$(get_config_field backups.sftp.host)
+SFTP_USER_FROM_CONFIG=$(get_config_field backups.sftp.user)
+SFTP_PATH_FROM_CONFIG=$(get_config_field backups.sftp.path)
 RETENTION_DAYS_FROM_CONFIG=$(get_config_field backups.retention.daily 7)
 RETENTION_WEEKS_FROM_CONFIG=$(get_config_field backups.retention.weekly 4)
 RETENTION_MONTHS_FROM_CONFIG=$(get_config_field backups.retention.monthly 6)
@@ -105,6 +109,9 @@ esac
 # CLI-override > конфиг (для отладочных прогонов и edge cases)
 BACKUP_DESTINATION="${BACKUP_DESTINATION:-$BACKUP_DESTINATION_FROM_CONFIG}"
 RCLONE_REMOTE="${RCLONE_REMOTE:-$RCLONE_REMOTE_FROM_CONFIG}"
+SFTP_HOST="${SFTP_HOST:-$SFTP_HOST_FROM_CONFIG}"
+SFTP_USER="${SFTP_USER:-$SFTP_USER_FROM_CONFIG}"
+SFTP_PATH="${SFTP_PATH:-$SFTP_PATH_FROM_CONFIG}"
 RETENTION_DAYS="${RETENTION_DAYS:-$RETENTION_DAYS_FROM_CONFIG}"
 RETENTION_WEEKS="${RETENTION_WEEKS:-$RETENTION_WEEKS_FROM_CONFIG}"
 RETENTION_MONTHS="${RETENTION_MONTHS:-$RETENTION_MONTHS_FROM_CONFIG}"
@@ -120,12 +127,18 @@ BACKUP_PASS_REF="${BACKUP_PASS_REF:-$BACKUP_PASS_REF_FROM_CONFIG}"
 
 | Параметр | Default | Описание |
 |----------|---------|----------|
-| `BACKUP_DESTINATION` | (из `infra-config.json`: `backups.destination`) | `s3` / `b2` / `yandex-disk-webdav` / `nextcloud-webdav` / `owncloud-webdav` / `local` |
+| `BACKUP_DESTINATION` | (из `infra-config.json`: `backups.destination`) | `s3` / `b2` / `yandex-disk-webdav` / `nextcloud-webdav` / `owncloud-webdav` / `sftp` / `local` |
 | `RCLONE_REMOTE` | (из `infra-config.json`: `backups.rclone_remote` — для webdav) | Имя rclone-remote из `~/.config/rclone/rclone.conf` |
 | `BACKUP_USER` | (required для webdav) | WebDAV username (берётся из менеджера паролей при выполнении) |
+| `SFTP_HOST` | (из `infra-config.json`: `backups.sftp.host` — required для sftp) | Как источник зовёт приёмник: ssh-алиас (предпочтительно) либо `host` |
+| `SFTP_PATH` | (из `infra-config.json`: `backups.sftp.path` — required для sftp) | Путь репозитория на приёмнике. **При chroot — от корня chroot** |
+| `SFTP_USER` | (из `infra-config.json`: `backups.sftp.user`, опционально) | Пользователь приёмника. Задаётся, ТОЛЬКО если не задан ssh-алиасом; уходит в адрес репозитория как `user@host`. Ключ, порт и прочее — исключительно в `~/.ssh/config` **того пользователя, от которого пойдёт задание** (обычно root): restic ssh-флаги не пробрасывает |
 | `BACKUP_PASS_REF` | (из `agent-config.json`: `secrets.manager` + конвенция индекса) | Ссылка на passphrase в менеджере паролей |
 | `S3_ACCESS_KEY` / `S3_SECRET_KEY` | (required для s3, из менеджера паролей) | S3 credentials |
 | `DATABASES` | (autodetect) | Список БД-контейнеров через запятую |
+| `BACKUP_PATHS` | (пусто) | Каталоги и файлы ХОСТА сверх дампов, через запятую: конфиги, код, данные приложений. Несуществующий путь — FAIL в логе, а не тихий пропуск |
+| `SQLITE_DBS` | (пусто) | Базы-файлы через запятую (боты, панели). Снимок делается `sqlite3 .backup` — копировать живой файл нельзя, получишь битую базу; после снимка прогоняется `PRAGMA integrity_check` |
+| `REMOTE_TARBALLS` | (пусто) | `имя=ssh-алиас` через запятую — забрать архив с сервера, у которого своего пути к хранилищу нет (другая страна, нет туннеля). Ключ на той стороне **обязан** быть заперт `command="..."` в `authorized_keys`, иначе ключ бэкапа = вход на чужой сервер. Пустой или битый архив считается отказом |
 | `RETENTION_DAYS` | (из `infra-config.json`: `backups.retention.daily`) | Daily snapshots |
 | `RETENTION_WEEKS` | (из `infra-config.json`: `backups.retention.weekly`) | Weekly snapshots |
 | `RETENTION_MONTHS` | (из `infra-config.json`: `backups.retention.monthly`) | Monthly snapshots |
@@ -142,12 +155,27 @@ BACKUP_PASS_REF="${BACKUP_PASS_REF:-$BACKUP_PASS_REF_FROM_CONFIG}"
 Проверить инструменты и доступы перед началом:
 
 ```bash
-# Инструменты
-which rclone restic jq || echo "Поставить недостающие"
+# Инструменты. rclone нужен ТОЛЬКО webdav-приёмникам — для s3/b2/sftp его отсутствие не беда.
+which restic jq || echo "Поставить недостающие"
 
-# Доступ к хранилищу (для WebDAV-варианта типа Яндекс.Диск, NextCloud)
-# Имя remote'а в rclone задаётся оператором при `rclone config` — например, `webdav-backup`.
-rclone lsd "$RCLONE_REMOTE": || echo "Сначала настроить rclone config"
+# Доступ к хранилищу — проверяется по типу приёмника
+case "$BACKUP_DESTINATION" in
+  yandex-disk-webdav|nextcloud-webdav|owncloud-webdav)
+    # Имя remote'а задаёт оператор при `rclone config` — например, `webdav-backup`.
+    which rclone || echo "Поставить rclone"
+    rclone lsd "$RCLONE_REMOTE": || echo "Сначала настроить rclone config"
+    ;;
+  sftp)
+    which ssh sftp || echo "Поставить клиент openssh — им ходит restic"
+    # Ходим ТЕМ ЖЕ путём и ОТ ТОГО ЖЕ пользователя, от которого потом пойдёт задание
+    # (обычно root: у него свой ~/.ssh/config и свой known_hosts — алиас из домашки
+    # оператора root'у не виден, и ночью задание упадёт при зелёной дневной проверке).
+    # Учётка приёмника обычно заперта (ForceCommand internal-sftp) — обычный ssh
+    # к ней НЕ откроет шелл, и это правильно. Проверяем именно sftp-канал.
+    sudo -n sftp -b /dev/null "${SFTP_USER:+$SFTP_USER@}$SFTP_HOST" && echo "sftp-канал открыт" || \
+      echo "Нет доступа к приёмнику от имени пользователя задания: проверь ~/.ssh/config и known_hosts этого пользователя, ключ на источнике и authorized_keys приёмника"
+    ;;
+esac
 
 # Список БД-контейнеров (autodetect)
 docker ps --format '{{.Names}}' | grep -E '(postgres|mysql|mariadb|redis)'
@@ -169,11 +197,24 @@ restic создаёт зашифрованный репозиторий один
 export RESTIC_PASSWORD="$(read_from_vault $BACKUP_PASS_REF)"
 
 # Установить URL репозитория (под выбранное хранилище)
+# ВАЖНО: значения слева — ровно те, что разрешает enum схемы (`backups.destination`).
+# Ветка `webdav)` не совпадала ни с одним из них, и облачный приёмник падал с «неизвестен»
+# при исправном конфиге (аудит 2026-09-24).
 case "$BACKUP_DESTINATION" in
-  s3)     export RESTIC_REPOSITORY="s3:s3.amazonaws.com/$BACKUP_BUCKET/$RESTIC_REPO_PATH" ;;
-  b2)     export RESTIC_REPOSITORY="b2:$BACKUP_BUCKET:$RESTIC_REPO_PATH" ;;
-  webdav) export RESTIC_REPOSITORY="rclone:$RCLONE_REMOTE:$RESTIC_REPO_PATH" ;;  # Яндекс.Диск / NextCloud / ownCloud
-  *) echo "ERROR: BACKUP_DESTINATION не задан или неизвестен (s3/b2/webdav)" >&2; exit 2 ;;
+  s3) export RESTIC_REPOSITORY="s3:s3.amazonaws.com/$BACKUP_BUCKET/$RESTIC_REPO_PATH" ;;
+  b2) export RESTIC_REPOSITORY="b2:$BACKUP_BUCKET:$RESTIC_REPO_PATH" ;;
+  yandex-disk-webdav|nextcloud-webdav|owncloud-webdav)
+      export RESTIC_REPOSITORY="rclone:$RCLONE_REMOTE:$RESTIC_REPO_PATH" ;;
+  # Свой второй сервер. SFTP_PATH — путь НА ПРИЁМНИКЕ; при ChrootDirectory он считается
+  # от корня chroot, а не от корня файловой системы (см. references/restic-quirks.md).
+  # Пользователь берётся из ssh-алиаса; SFTP_USER задают, только когда алиаса нет.
+  sftp)
+      if [ -n "${SFTP_USER:-}" ]; then
+          export RESTIC_REPOSITORY="sftp:$SFTP_USER@$SFTP_HOST:$SFTP_PATH"
+      else
+          export RESTIC_REPOSITORY="sftp:$SFTP_HOST:$SFTP_PATH"
+      fi ;;
+  *) echo "ERROR: BACKUP_DESTINATION не задан или неизвестен (s3/b2/*-webdav/sftp)" >&2; exit 2 ;;
 esac
 
 # Инициализация (только один раз!)
