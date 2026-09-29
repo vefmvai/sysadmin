@@ -416,6 +416,44 @@ PY
 if [ "$LONG_V" = "block" ]; then PASS=$((PASS+1)); echo "  ✅ 16000 пар кавычек — разобрано за 5 с, правка найдена"
 else FAIL=$((FAIL+1)); echo "  ❌ 16000 пар кавычек: ${LONG_V:-пусто} — разбор не линейный или правка потеряна"; fi
 
+echo "[2и] Старые дыры: не видел и хук до 25.09.2026 (проверка 26.09.2026)"
+# Каждый случай парой: старый хук пропускал (дыра настоящая), нынешний останавливает. Формы —
+# из скиллов (migrate-server-to-server: `docker compose -f … up -d`; setup-vpn-panel: sqlite3 x-ui.db).
+n=0
+for c in \
+  $'ssh prod \'cd /opt/app && docker-compose up -d\'' \
+  $'ssh old \'docker compose -f /opt/bot1/docker-compose.yml up -d\'' \
+  $'ssh prod \'docker run -d --name uptime --restart unless-stopped -p 127.0.0.1:3001:3001 louislam/uptime-kuma\'' \
+  $'ssh prod \'sudo git clone https://github.com/x/y /opt/newapp\'' \
+  $'ssh prod \'echo x >| /etc/nginx/conf.d/a.conf\'' \
+  $'ssh prod \'sudo install -m 755 /tmp/run.sh /opt/infra/backup/run-backup.sh\'' \
+  $'ssh prod \'sudo sqlite3 /etc/x-ui/x-ui.db\' <<\'SQL\'\nUPDATE settings SET value=\'2053\' WHERE key=\'webPort\';\nSQL' \
+  $'echo "UPDATE settings SET value=\'2053\' WHERE key=\'webPort\';" | ssh prod \'sudo sqlite3 /etc/x-ui/x-ui.db\''; do
+  n=$((n+1))
+  if [ -s "$OLD_HOOK" ]; then
+    mk "$TMP/od-old$n.jsonl" "Bash:$c"
+    SAVED_HOOK="$HOOK"; HOOK="$OLD_HOOK"
+    check pass "старый пропускал: ${c:0:55}" "$TMP/od-old$n.jsonl"
+    HOOK="$SAVED_HOOK"
+  fi
+  mk "$TMP/od$n.jsonl" "Bash:$c"
+  check block "нынешний ловит: ${c:0:55}" "$TMP/od$n.jsonl"
+done
+n=0
+for c in \
+  "cp .env.example /Users/me/Projects/app/.env" \
+  "docker run --rm alpine echo hi" \
+  "ssh prod 'docker compose -f /opt/app/compose.yml logs -f app'" \
+  "ssh prod 'docker compose -f /opt/app/compose.yml ps'" \
+  "git clone https://github.com/x/y /tmp/y" \
+  "echo 'SELECT * FROM settings;' | ssh prod 'sudo sqlite3 /etc/x-ui/x-ui.db'" \
+  "ssh prod 'pg_dump app > /opt/app/backups/app-2026-09-26.sql'" \
+  "ssh prod 'sudo cp /etc/nginx/nginx.conf /opt/backups/nginx.conf'" \
+  "ssh prod 'sudo cp /etc/cron.d/backup /opt/app/backup/root.cron'"; do
+  n=$((n+1)); mk "$TMP/odro$n.jsonl" "Bash:$c"
+  check pass "не правка: ${c:0:60}" "$TMP/odro$n.jsonl"
+done
+
 echo "[2] Изменение без обновления inventory — останавливаем"
 mk "$TMP/change1.jsonl" "Bash:ssh prod-host 'docker compose up -d academii'"
 check block "docker compose up" "$TMP/change1.jsonl"
@@ -452,6 +490,28 @@ mk "$TMP/ok2.jsonl" "Bash:ssh prod-host 'systemctl restart nginx'" "Bash:ssh pro
 check pass "пересборка снимка/дашборда" "$TMP/ok2.jsonl"
 mk "$TMP/ok3.jsonl" "Bash:ssh prod-host 'docker compose up -d'" "Bash:bash scripts/dump-snapshot.sh prod-host"
 check pass "пересъёмка снимка" "$TMP/ok3.jsonl"
+mk "$TMP/ok4.jsonl" "Bash:ssh prod-host 'systemctl restart nginx'" \
+   $'Bash:cat >> ../infra/inventory/hosts/prod-host/services.md <<\'EOF\'\n- nginx перезапущен\nEOF'
+check pass "запись в inventory командой" "$TMP/ok4.jsonl"
+
+echo "[3а] Чтение inventory обновлением не считается (проверка 26.09.2026)"
+# Раньше любое упоминание `inventory/` в команде засчитывалось как обновление: `cat` справки
+# рядом с правкой сервера выключал сторож на весь ход.
+n=0
+for c in \
+  "cat ../infra/inventory/README.md; ssh prod 'sudo systemctl restart nginx'" \
+  "grep -rn nginx ../infra/inventory/ && ssh prod 'sudo systemctl reload nginx'" \
+  "git -C ../infra diff inventory/ && ssh prod 'docker compose up -d'" \
+  "sed -n '1,40p' ../infra/inventory/hosts/prod/services.md; ssh prod 'sudo ufw allow 8443'"; do
+  n=$((n+1)); mk "$TMP/invro$n.jsonl" "Bash:$c"
+  check block "чтение + правка: ${c:0:55}" "$TMP/invro$n.jsonl"
+done
+if [ -s "$OLD_HOOK" ]; then
+  mk "$TMP/invro-old.jsonl" "Bash:cat ../infra/inventory/README.md; ssh prod 'sudo systemctl restart nginx'"
+  SAVED_HOOK="$HOOK"; HOOK="$OLD_HOOK"
+  check pass "старый хук молчал на «чтение + правка» (дыра видна)" "$TMP/invro-old.jsonl"
+  HOOK="$SAVED_HOOK"
+fi
 
 echo "[4] Защита от зацикливания"
 mk "$TMP/loop.jsonl" "Bash:ssh prod-host 'docker compose restart api'"

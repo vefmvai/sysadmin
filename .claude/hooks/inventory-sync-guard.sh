@@ -135,7 +135,12 @@ CRON_PATH = (r"/etc/cron\.(d|daily|hourly|weekly|monthly)(/|(?![\w.-]))"
              r"|/etc/(ana)?crontab(?![\w.-])|/etc/crontabs/|/var/spool/cron/")
 
 CHANGE_RE = re.compile("".join([
-    r"docker\s+(compose\s+)?(up|down|restart|stop|start|rm|create|pull\s+.*&&)",
+    # Флаги перед глаголом (`docker compose -f /opt/x/compose.yml up -d` — форма из скилла
+    # migrate-server-to-server) и compose первой версии (`docker-compose up`) раньше проходили.
+    r"(docker\s+compose|docker-compose|docker)\s+((-f|--file|-p|--project-name|--profile|--env-file"
+    r"|--project-directory|--context|-c)\s+\S+\s+|--?[\w-]+\s+)*(up|down|restart|stop|start|rm|create|pull\s+.*&&)",
+    # Новый постоянный контейнер: `docker run -d`, `--restart`. Разовый `docker run --rm …` — не правка.
+    r"|docker\s+(container\s+)?run\s(.*\s)?(-[a-zA-Z]*d[a-zA-Z]*|--detach|--restart(=\S+)?)(\s|$)",
     r"|docker\s+(network|volume)\s+(create|rm|connect|disconnect)",
     r"|systemctl\s+(-\S+\s+)*(restart|start|stop|reload|enable|disable|daemon-reload|edit|mask|unmask"
     r"|set-property|link|revert|reenable|preset|set-default)",
@@ -189,11 +194,15 @@ CONFIG_FILE = re.compile(r"(^|/)(\.env(\.(?!example|sample|template|dist)[\w-]+)
 # Раздача ключей входа — всегда правка доступа, и через `~`.
 KLYUCHI = re.compile(r"^(~|\$HOME|\$\{HOME\})/\.(ssh/(?!known_hosts)|bashrc$|profile$|bash_profile$|zshrc$"
                      r"|config/systemd(/|$))")
-# Временное и чужое: /tmp, устройства, диск своего компьютера в Git Bash (/c/…).
-VREMENNOE = re.compile(r"^/(tmp|var/tmp|dev|proc|sys|run|[a-z])(/|$)", re.IGNORECASE)
+# Временное и чужое: /tmp, устройства, свой компьютер — диск в Git Bash (/c/…) и домашние
+# каталоги macOS (/Users/…: на серверах Linux такого каталога нет).
+VREMENNOE = re.compile(r"^/(tmp|var/tmp|dev|proc|sys|run|Users|[a-z])(/|$)", re.IGNORECASE)
 # Данные, а не настройки: снимки баз, архивы, логи, пробное восстановление (`/opt/backups/dbs`).
 DANNYE = re.compile(r"^/(opt|srv)/((backups?|dumps?|snap(shots?)?|archives?|restore[\w-]*)(/|$)"
                     r"|[^/]+/(backups?|logs?)/)")
+# …но скрипт в таком каталоге — программа, а не данные: `install … /opt/infra/backup/run.sh`.
+# Только скрипты: копия конфига (`nginx.conf`, `root.cron`) в каталоге бэкапов — данные.
+PROGRAMMA = re.compile(r"\.(sh|py|pl|rb|js)$", re.IGNORECASE)
 # Копия-страховка с хвостом-датой или меткой (`nginx.conf.bak`, `crontab.bak-2026-09-25`) — не правка.
 # Метка — только в конце или перед датой: `my.old-site.kz` — не страховка, а новый сайт.
 STRAHOVKA = re.compile(r"(\.bak|\.orig|\.old|\.save|\.dist|~)([._-]?\d[\w.:-]*)?$", re.IGNORECASE)
@@ -207,7 +216,7 @@ CHUZHIE = {"apt", "apt-get", "aptitude", "pip", "pip3", "pipx", "npm", "pnpm", "
 ZAPUSKATELI = {"sudo", "doas", "env", "xargs", "nohup", "exec", "time", "nice", "ionice", "setsid", "stdbuf"}
 GLAGOL_RE = re.compile(r"(?:^|[\s'\"(`;])\\?(?:(?:/usr)?/s?bin/)?(cp|mv|install|ln|rsync|scp|tee|dd|sed|perl|rm|unlink"
                        r"|touch|truncate|htpasswd|tar|curl|wget|yq|awk|unzip|openssl|gpg|patch|sponge)(?=\s)")
-PERENAPR_RE = re.compile(r"(?:^|[^<\d&>])\d*(>>?|&>>?)\s*(\S+)")
+PERENAPR_RE = re.compile(r"(?:^|[^<\d&>])\d*(>>?\|?|&>>?)\s*(\S+)")   # `>|` — запись в обход noclobber
 
 def put(tok, cwd=None):
     t = tok.strip("'\"()`;")
@@ -222,7 +231,8 @@ def v_konfig(tok, spisok=SERVER_PATH, cwd=None):
         return True
     if not t.startswith("/") or VREMENNOE.match(t):
         return False
-    konfig = (bool(spisok.match(t + ("/" if t.count("/") == 1 else ""))) and not (DANNYE.match(t) and "/../" not in t)) \
+    dannye = DANNYE.match(t) and "/../" not in t and not PROGRAMMA.search(t)
+    konfig = (bool(spisok.match(t + ("/" if t.count("/") == 1 else ""))) and not dannye) \
         or bool(CONFIG_FILE.search(t))
     return konfig and (bool(VKLYUCHENO.search(t)) or not STRAHOVKA.search(t))
 
@@ -439,14 +449,26 @@ def zapusk_obertki(probe):
 GIT_RE = re.compile(r"(?:^|[\s'\"(`;])git\s+(-C\s+(\S+)\s+)?(pull|checkout|reset|merge|rebase|stash|apply|am"
                     r"|cherry-pick|restore|switch)\b")
 
+# Новая рабочая копия на сервере: `sudo git clone https://… /opt/newapp`, `cd /opt && git clone …`.
+GIT_CLONE_RE = re.compile(r"(?:^|[\s'\"(`;])git\s+(?:-C\s+(\S+)\s+)?clone\s+(.*)$")
+GIT_CLONE_ZNACH = ("-b", "--branch", "--depth", "-o", "--origin", "-c", "--config", "--reference", "-j", "--jobs",
+                   "--filter", "--separate-git-dir", "--template", "-u", "--upload-pack")
+
 def git_na_servere(probe, cwd=None):
+    mc = GIT_CLONE_RE.search(probe)
+    if mc:
+        baza = put(mc.group(1), cwd) if mc.group(1) else cwd
+        args = [a for a in _argumenty(mc.group(2), GIT_CLONE_ZNACH) if not a.startswith("-")]
+        if args:
+            kuda = args[1] if len(args) > 1 else re.sub(r"\.git$", "", put(args[0]).rsplit("/", 1)[-1])
+            kuda = put(kuda, baza)
+            if kuda.startswith("/") and not VREMENNOE.match(kuda) and SERVER_PATH.match(kuda + "/"):
+                return True
     m = GIT_RE.search(probe)
     if not m:
         return False
     kuda = put(m.group(2), cwd) if m.group(2) else cwd
     return bool(kuda) and kuda.startswith("/") and not VREMENNOE.match(kuda) and bool(SERVER_PATH.match(kuda + "/"))
-
-INVENTORY_RE = re.compile(r"inventory[/\\]|/infra/.*\.md$|refresh\.sh|dump-snapshot", re.IGNORECASE)
 
 # Сегменты, начинающиеся с read-only утилиты, изменением не считаются: их аргументы —
 # данные, а не команды. Без этого `grep -n "crontab" file` числился правкой инфраструктуры
@@ -624,11 +646,46 @@ def grubye_segmenty(cmd):
             segs.append((chast, razd))
     return segs
 
+# База настроек правится SQL, пришедшим через канал или heredoc: `echo "UPDATE …" | ssh h 'sqlite3
+# /etc/x-ui/x-ui.db'`, `ssh h 'sqlite3 /etc/x-ui/x-ui.db' <<SQL`. Программа и SQL оказываются в
+# разных кусках, и ни одно чтение по кускам их не сведёт — смотрим всю команду целиком.
+SQLITE_BAZA = re.compile(r"sqlite3\s+(?:-\S+\s+)*['\"]?/(?:etc|opt|srv|var/www|usr/local)/\S+")
+SQL_ZAPIS = re.compile(r"\b(update\s+\S+\s+set|insert\s+(or\s+\w+\s+)?into|delete\s+from|replace\s+into"
+                       r"|alter\s+table|create\s+(table|index)|drop\s+(table|index))\b", re.IGNORECASE)
+
 def changes_infra(cmd):
     """Ищет изменяющую команду в двух чтениях (см. выше), пропуская read-only сегменты."""
     tochnyj = re.sub(r"\\\r?\n", " ", cmd)             # продолжение строки обратной косой — как в bash
     tochnyj = re.sub(r"\|[ \t]*\r?\n\s*", "| ", tochnyj)   # канал, перенесённый на новую строку
-    return _po_segmentam(razbit(tochnyj), True) or _po_segmentam(grubye_segmenty(cmd), False)
+    hit = _po_segmentam(razbit(tochnyj), True) or _po_segmentam(grubye_segmenty(cmd), False)
+    if not hit:
+        baza = SQLITE_BAZA.search(cmd)
+        if baza and SQL_ZAPIS.search(cmd):
+            hit = baza.group(0)
+    return hit
+
+# Обновление inventory командой. Раньше засчитывалось любое упоминание папки `inventory/` —
+# и `cat inventory/README.md` рядом с правкой сервера выключал сторож на весь ход (проверка
+# 26.09.2026). Теперь чтение (cat, grep, ls, git diff, sed -n …) не в счёт; в счёт — запись
+# в inventory, любая другая команда над ним и пересборка снимка или дашборда.
+INVENTORY_RE = re.compile(r"inventory[/\\]|/infra/.*\.md$|refresh\.sh|dump-snapshot", re.IGNORECASE)
+INVENTORY_PUT = re.compile(r"inventory[/\\]|/infra/\S*\.md\b", re.IGNORECASE)
+INVENTORY_SBORKA = re.compile(r"refresh\.sh|dump-snapshot|inventory-scan", re.IGNORECASE)
+CHTENIE = re.compile(r"^(ls|find|tree|realpath|sed\s+-n|git\s+(-C\s+\S+\s+)?(diff|log|show|status|blame|grep))(\s|$)",
+                     re.IGNORECASE)
+
+def obnovil_inventory(cmd):
+    if INVENTORY_SBORKA.search(cmd):
+        return True
+    for seg, _ in grubye_segmenty(cmd):
+        if not INVENTORY_PUT.search(seg):
+            continue
+        if any(INVENTORY_PUT.search(m.group(2)) for m in PERENAPR_RE.finditer(seg)):
+            return True                                 # `cat > inventory/x.md <<EOF`, `echo … >> …`
+        sama = komanda(PREFIX_RE.sub("", seg).strip())
+        if not (READONLY_LEAD.match(sama) or CHTENIE.match(sama)):
+            return True
+    return False
 
 changed, updated = [], False
 for rec in turn:
@@ -644,7 +701,7 @@ for rec in turn:
             hit = changes_infra(cmd)
             if hit:
                 changed.append(hit.splitlines()[0][:90])
-            if INVENTORY_RE.search(cmd):       # обновление снимка/дашборда скриптом — тоже засчитываем
+            if obnovil_inventory(cmd):         # запись в inventory или пересборка снимка/дашборда
                 updated = True
         elif name in ("Write", "Edit", "NotebookEdit"):
             if INVENTORY_RE.search(str(inp.get("file_path", ""))):
