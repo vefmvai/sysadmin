@@ -28,8 +28,10 @@
 # sed -i, dd, tar -x, curl -o… — в /etc, /opt, /srv, /var/www, /usr/local, юниты systemd,
 # скрытые файлы root и пользователей, а `.env` и compose — в любом серверном каталоге.
 # НЕ правка: запись в /tmp, /var/lib, /var/log и на свой компьютер; копия-страховка рядом с
-# оригиналом (кроме каталогов *-enabled/, откуда грузится всё); дампы и бэкапы в /opt/backups;
-# тело heredoc, если его читает не оболочка (текст коммита, содержимое файла, код python).
+# оригиналом (кроме каталогов *-enabled/, откуда грузится всё); дампы и бэкапы в /opt/backups.
+# Текст коммита, PR или файла, где написана такая команда, ОСТАНАВЛИВАЕТ — это цена правила 4
+# свода замков (решение оператора 25.07.2026). Команда читается дважды — точно и грубо, правкой
+# считается находка любого из чтений (см. changes_infra).
 #
 # ГРАНИЦА — чего замок НЕ видит (не расширять до паралича, см. правило 4 свода замков):
 #   - путь в переменной или цикле: `cp x "$CRON_D/y"`, `for f in /etc/cron.d/*; do sed -i …`
@@ -44,7 +46,9 @@
 #     (`ssh h 'bash -s' < fix.sh`, `ssh h "$SCRIPT"`, `ssh h 'sudo bash /tmp/fix.sh'`), и код
 #     python, который сам ходит на сервер (subprocess, paramiko) — содержимого замок не знает.
 # Проверено двумя раундами независимой проверки 25.09.2026: расписание (343 случая) и запись
-# в настройки сервера (370 случаев, четыре атакующих и перепроверщика).
+# в настройки сервера (370 случаев, четыре атакующих и перепроверщика). Проверка мейнтейнера
+# 26.09.2026 прогнала старый и новый хук парой и нашла 17 правок, которые старый ловил, а
+# новый пропускал, — отсюда второе, грубое чтение и тест «не хуже старого».
 #
 # Ручная проверка: bash .claude/hooks/tests/test-inventory-sync-guard.sh
 
@@ -139,8 +143,12 @@ CHANGE_RE = re.compile("".join([
     # Просмотр сертификатов (`certbot certificates`, `acme.sh --list`, `--version`) и путь
     # `/etc/cron.d/certbot` правкой не считаем: холостые остановки на диагностике TLS
     # (независимая проверка 25.09.2026). `certbot renew --dry-run` оставлен правкой:
-    # запускает ли он хуки развёртывания, не проверялось.
-    r"|(?<![\w/.-])(certbot|acme\.sh)\s+(?!certificates\b|--list\b|--version\b)",
+    # запускает ли он хуки развёртывания, не проверялось. Программа — и по полному пути:
+    # `~/.acme.sh/acme.sh --renew` стоит в скилле rotate-secrets, `/usr/bin/certbot renew`
+    # (без пути правило их не видело — проверка мейнтейнера 26.09.2026). Путь — только
+    # установочный: `/etc/cron.d/certbot` остаётся файлом, а не вызовом.
+    r"|(?<![\w/.-])(?:(?:/usr)?(?:/local)?/s?bin/|/snap/bin/|(?:~|\$HOME|\$\{HOME\}|/root|/home/[^/\s]+)/\.acme\.sh/)?"
+    r"(certbot|acme\.sh)\s+(?!certificates\b|--list\b|--version\b)",
     r"|ufw\s+(--force\s+)?(allow|deny|delete|limit|reject|default|enable|disable|reset|route|insert|prepend)",
     r"|(hostnamectl|timedatectl|localectl)\s+(\S+\s+)*?set-",
     # Учётные записи — это доступ к серверу (inventory/access.md).
@@ -392,8 +400,15 @@ OBERTKA = re.compile(r"(^|/)([\w.-]*(deploy|update)[\w.-]*\.sh|[\w.]*(deploy|upd
                      r"|^/usr/local/s?bin/[\w.-]*(deploy|update|restart)[\w.-]*$", re.IGNORECASE)
 PREFIKSY = {"sudo", "doas", "env", "nohup", "exec", "time", "nice", "ionice", "timeout", "bash", "sh", "zsh",
             "source", ".", "setsid", "stdbuf"}
+# Слова оболочки перед командой: `for …; do ./deploy.sh`, `if ./deploy.sh; then`, `{ ./deploy.sh; }`,
+# `! ./update.sh`. Без них первым словом был `do`/`if`, и обёртка проходила (проверка 26.09.2026).
+SLOVA_OBOLOCHKI = {"do", "then", "else", "elif", "if", "while", "until", "!", "{", "(", "exec"}
+VVOD_OBERTKI = re.compile(r"(?:^|\s)(?:\S*/)?(?:bash|sh|zsh|ssh)\s[^<|;&]*<\s*['\"]?(\S+?)['\"]?(?:\s|$)")
 
 def zapusk_obertki(probe):
+    m = VVOD_OBERTKI.search(probe)                      # `ssh h bash -s prod < deploy.sh`: аргументы
+    if m and OBERTKA.search(m.group(1)):                # между оболочкой и `<` не важны
+        return True
     slova, i = probe.split(), 0
     while i < len(slova):
         w = slova[i].strip("'\"(`\\")
@@ -413,7 +428,8 @@ def zapusk_obertki(probe):
         if w in ("-u", "-g", "-C", "-p") and i + 1 < len(slova):
             i += 2
             continue
-        if w in PREFIKSY or w.startswith("-") or re.fullmatch(r"\w+=\S*", w) or re.fullmatch(r"\d+[smhd]?", w):
+        if w in PREFIKSY or w in SLOVA_OBOLOCHKI or w.startswith("-") or re.fullmatch(r"\w+=\S*", w) \
+                or re.fullmatch(r"\d+[smhd]?", w):
             i += 1
             continue
         return bool(OBERTKA.search(w))
@@ -515,7 +531,10 @@ def razbit(cmd):
     def kod_li():
         # Текст от начала сегмента (или от открывшей кода кавычки) до этой кавычки: команды
         # внутри — только если перед ней РОВНО `ssh [флаги] хост`, `eval` или `… -c`.
-        nachalo = stek[-1][2] + 1 if stek else 0
+        # Смотрим только хвост: `ssh [флаги] хост` и `eval` длиннее 300 символов не бывают, а
+        # склейка всего буфера на каждой кавычке делала разбор квадратичным — строка с 20000
+        # пар кавычек не укладывалась в таймаут хука, и он молча пропускал (26.09.2026).
+        nachalo = max(stek[-1][2] + 1 if stek else 0, len(buf) - 300)
         tekst = PREFIX_RE.sub("", "".join(buf[nachalo:])).strip()
         return bool(re.search(r"(^|\s)-\w*c$", tekst) or tekst == "eval" or SSH_GOLOVA.fullmatch(tekst + " "))
     while i < n:
@@ -548,214 +567,68 @@ def razbit(cmd):
     segs.append(("".join(buf), razd))
     return segs
 
-# Тело heredoc — это ВХОД программы, а не команды: текст сообщения `git commit -F - <<EOF`,
-# содержимое файла `cat > run.sh <<EOF`, код `python - <<EOF`. Разбирать его как команды —
-# значит останавливать ход на тексте коммита, где упомянуты `ufw default` или `git pull`
-# (ложные остановки 25.09.2026 в самой сессии правки замка).
-# Тело выкидывается из разбора, ТОЛЬКО если его читает известная программа-читатель данных
-# (CHITATELI_DANNYH: cat, git, gh, python, psql, jq, read, `while … done` …) и в логической
-# строке нет оболочки, которая получит его как команды: ssh/sshpass/plink в любом месте
-# (`timeout 120 ssh`, `cat <<EOF | ssh h 'bash -s'`, `for h …; do ssh $h`), оболочка без
-# файла-скрипта (`bash`, `bash -s`, `sudo -iu root bash`, `bash -c "$(cat <<EOF …)"`),
-# `sudo -s`/`-i`, `su`, `at`. Незнакомый читатель (`expect`, `runuser`, `docker exec … sh`) —
-# тело разбирается как команды, как раньше: для дисциплинарного замка шум дешевле дыры.
-# Оператор `<<` ищется только вне кавычек-данных и вне комментария (`grep "<<'PY'" файл`,
-# `# см. cat <<EOF` — не heredoc); тело начинается после конца ЛОГИЧЕСКОЙ строки (перенос
-# `\`); `<<\EOF` — тоже метка; вложенные тела разбираются рекурсивно; нет закрывающей метки —
-# ничего не выкидываем; `"$(cat <<EOF … EOF)" && ssh …` — строка после метки приклеивается
-# к команде. Первая версия (по первому слову команды, умолчание «не узнал — выкинуть») дала
-# 21 регрессию на независимой проверке 25.09.2026. Сама запись в первой строке
-# (`cat > /etc/x <<EOF`) ловится как раньше.
-HEREDOC_OP = re.compile(r"<<(-?)\s*\\?(['\"]?)([A-Za-z_][\w.-]*)\2")
-OBOLOCHKA = r"(?:/\S*/)?(bash|sh|zsh|dash|ksh|ash)"
-CHITATELI_DANNYH = {"cat", "tee", "git", "gh", "glab", "python", "python3", "py", "node", "deno", "perl", "ruby",
-                    "php", "psql", "mysql", "mariadb", "sqlite3", "jq", "yq", "awk", "gawk", "sed", "mail", "mailx",
-                    "sendmail", "msmtp", "curl", "wc", "sort", "uniq", "grep", "head", "tail", "read", ":", "done",
-                    "base64", "xxd", "iconv", "column", "cut", "tr", "envsubst", "true", "less", "more"}
-OBERTKI_KOMANDY = {"sudo", "doas", "env", "nohup", "nice", "ionice", "exec", "time", "command", "builtin", "!",
-                   "xargs", "stdbuf", "setsid"}
+# Два чтения команды. Сторож дисциплинарный и fail-open, поэтому точность разбора ему нужна
+# только для того, чтобы НАЙТИ больше правок, а не чтобы пропустить больше текста (правило 4
+# свода замков; решение оператора 25.07.2026: остановка на упоминании — цена, а не дефект).
+#
+# 1) Точное чтение — razbit(): понимает кавычки, не режет `sed -i 's|a|b|' /etc/x` и директивы
+#    nginx с `;`, различает `cd /opt/app && … .env`. Им найдены правки, которых раньше не видели.
+# 2) Грубое чтение — как до 25.09.2026: режем по `| || && ;` и переводу строки, не глядя на
+#    кавычки и не вынимая тел heredoc.
+# Правка найдена, если её нашло ЛЮБОЕ из двух. Первая версия этого PR выкидывала тела heredoc
+# «у известного читателя» и считала кавычки sed/echo данными — и на независимой проверке
+# 26.09.2026 пропустила 17 правок из 39, которые старый замок ловил: кавычка на несколько строк,
+# `ssh "$H" '…; sudo tee /etc/…'`, `while read c; do ssh h "$c"; done <<EOF`, `bash /dev/stdin <<EOF`.
+# Цена грубого чтения — остановка на тексте коммита или PR, где написана команда: так было
+# и до 25.09.2026, это та самая цена из правила 4.
+GRUBYJ_RAZREZ = re.compile(r"(\|\||&&|;|\||\n)")
 
-def _heredoc_operatory(s, stek):
-    """Операторы heredoc в строке вне кавычек-данных и вне комментария. `stek` — контексты
-    (' " $( ), переживает перевод строки: многострочные кавычки не теряются."""
-    ops, i, n = [], 0, len(s)
-    while i < n:
-        top = stek[-1] if stek else None
-        ch = s[i]
-        if top == "'":
-            if ch == "'":
-                stek.pop()
-            i += 1
-            continue
-        if ch == "\\":
-            i += 2
-            continue
-        if top == '"':
-            if ch == '"':
-                stek.pop()
-            elif s.startswith("$(", i):
-                stek.append("$(")
-                i += 2
-                continue
-            i += 1
-            continue
-        if ch == "#" and (i == 0 or s[i - 1] in " \t;&|("):
-            break                                       # комментарий до конца строки
-        if ch in "'\"":
-            stek.append(ch)
-        elif s.startswith("$(", i):
-            stek.append("$(")
-            i += 2
-            continue
-        elif ch == ")" and top == "$(":
-            stek.pop()
-        elif s.startswith("<<<", i):
-            i += 3
-            continue
-        elif s.startswith("<<", i):
-            m = HEREDOC_OP.match(s, i)
-            if m:
-                ops.append(m)
-                i = m.end()
-                continue
-        i += 1
-    return ops
+def proverit_segment(seg, razd, cwd, tochno=True):
+    """Одна проверка сегмента. Возвращает (находка или None, cwd после сегмента)."""
+    piped = razd == "|"
+    probe = PREFIX_RE.sub("", seg).strip()
+    sama = komanda(probe)
+    mcd = re.match(r"^cd\s+(\S+)", sama)
+    if mcd:                                         # `cd /opt/app && echo X >> .env`
+        cel = put(mcd.group(1), cwd)
+        cwd = cel if cel.startswith("/") and not VREMENNOE.match(cel) else None
+    if zapis_perenapravleniem(seg, cwd):
+        return (probe or seg.strip()), cwd
+    if not probe or READONLY_LEAD.match(sama):
+        return None, cwd
+    # crontab в грубом чтении: `|` внутри кавычек рождает ложные куски (`grep -E "x|crontab" лог`
+    # даёт «команду» `crontab" лог`). Поэтому там не считаем канал и слово, прилипшее к кавычке;
+    # эти формы — `… | crontab`, `'crontab' -r` — ловит точное чтение, оно кавычки понимает.
+    cron = crontab_changes(probe, piped) if tochno else \
+        (not re.search(r"crontab['\"]", probe) and crontab_changes(probe, False))
+    if (CHANGE_RE.search(probe) or cron or pishet_v_konfig(probe, cwd)
+            or zapusk_obertki(probe) or git_na_servere(probe, cwd)):
+        return probe, cwd
+    return None, cwd
 
-ZAKRYTYE_KAVYCHKI = re.compile(r"'[^']*'|\"(?:[^\"\\\\]|\\\\.)*\"")
-SSH_SLOVO = re.compile(r"(?<![\w.-])(?:/\S*/)?(ssh|plink)(?=\s|$)")
-SSH_FLAG_ZNACH = {"-o", "-i", "-p", "-l", "-F", "-J", "-L", "-R", "-D", "-E", "-c", "-m", "-b", "-W", "-P", "-pw"}
+def _po_segmentam(segs, tochno):
+    cwd = None
+    for seg, razd in segs:
+        hit, cwd = proverit_segment(seg, razd, cwd, tochno)
+        if hit:
+            return hit
+    return None
 
-def _udalyonnaya(tekst, konec):
-    """Удалённая команда ssh/plink, начинающегося в `konec`: всё после флагов и хоста до `<<`."""
-    slova, k = re.split(r"<<", tekst[konec:], maxsplit=1)[0].split(), 0
-    while k < len(slova) and slova[k].startswith("-"):
-        k += 2 if slova[k] in SSH_FLAG_ZNACH else 1
-    ost = " ".join(w for w in slova[k + 1:] if not re.fullmatch(r"\d*(>>?|<|&>>?)&?\d*\S*", w))
-    return ost.strip().strip("'\"").strip()
-
-def _telo_chitaet_obolochka(tekst):
-    if re.search(r"(?<![\w./-])" + OBOLOCHKA + r"\s+(-\S+\s+)*-\w*c\s+[\"']?\$\(", tekst):
-        return True                                     # `bash -c "$(cat <<EOF …)"` — тело станет скриптом
-    # ssh/plink: тело уходит удалённой команде. Нет её (`ssh h <<EOF`), это оболочка или внутри
-    # подстановка — команды; удалённый читатель данных (`ssh h 'cat > x'`, `ssh h psql`,
-    # `ssh h python3 -`) — данные; незнакомый — команды.
-    for m in SSH_SLOVO.finditer(ZAKRYTYE_KAVYCHKI.sub(lambda q: "Q" * len(q.group(0)), tekst)):
-        udal = _udalyonnaya(tekst, m.end())
-        if not udal or "$(" in udal or _telo_chitaet_obolochka(udal):
-            return True
-        chitatel = _chitatel(udal)
-        if chitatel not in CHITATELI_DANNYH and not re.fullmatch(OBOLOCHKA, chitatel):
-            return True
-    t = ZAKRYTYE_KAVYCHKI.sub(" ", tekst)               # содержимое закрытых кавычек — данные
-    for m in re.finditer(r"(?<![\w./-])" + OBOLOCHKA + r"(?=\s|$|[;|&)])", t):
-        toks = re.split(r"<<|[|;&)]", t[m.end():], maxsplit=1)[0].split()
-        if "-c" in toks:
-            continue                                    # тело — вход скрипта из -c
-        if "-s" in toks or not any(not x.startswith("-") for x in toks):
-            return True                                 # `bash`, `bash -s`, `sudo -iu root bash`
-    if re.search(r"(?<![\w./-])(sudo|doas)(\s+-\S+)+\s*(<<|$)", t):
-        return True                                     # `sudo -s <<EOF`, `sudo -i <<EOF`
-    return bool(re.search(r"(?<![\w./-])(su|at|batch)(?=\s|$)", t))
-
-def _chitatel(pered):
-    """Программа, которой достаётся тело: последняя команда перед `<<` без обёрток."""
-    pered = ZAKRYTYE_KAVYCHKI.sub("Q", pered.replace("\\\n", " "))   # `(`, `|` в кавычках — не границы
-    while True:                                         # закрытые `$(…)` и `…` — одно слово, не граница
-        svernuto = re.sub(r"\$\([^()]*\)|`[^`]*`", "SUBST", pered)
-        if svernuto == pered:
-            break
-        pered = svernuto
-    kusok = re.split(r"\$\(|\|\||&&|[;|(`]|\b(?:do|then|else)\b", pered)[-1]
-    slova, k = kusok.split(), 0
-    while k < len(slova):
-        w = slova[k].strip("'\"")
-        if w in ("-u", "-g", "-C", "timeout"):
-            k += 2
-            continue
-        if w in OBERTKI_KOMANDY or w.startswith("-") or re.fullmatch(r"\w+=\S*", w) or not w:
-            k += 1
-            continue
-        imya = w.rsplit("/", 1)[-1]
-        if imya in ("docker", "podman", "kubectl"):     # `docker compose exec -T db psql` — читатель psql
-            vnutri = [x.rsplit("/", 1)[-1] for x in slova[k + 1:]]
-            return next((x for x in vnutri if x in CHITATELI_DANNYH), imya)
-        return imya
-    return ""
-
-def _telo_komandy(tekst, pered):
-    if _telo_chitaet_obolochka(tekst):
-        return True
-    chitatel = _chitatel(pered)
-    if chitatel in CHITATELI_DANNYH or chitatel in ("ssh", "plink", "sshpass"):
-        return False                                    # для ssh удалённую команду уже разобрали выше
-    if re.fullmatch(OBOLOCHKA, chitatel):
-        return False                                    # `bash script.sh <<EOF` — тело: вход скрипта
-    return True                                         # незнакомый читатель — разбираем, как раньше
-
-def bez_tel_heredoc(cmd):
-    stroki, out, i, stek, logich, ozhidayut, prikleit = cmd.split("\n"), [], 0, [], [], [], False
-    while i < len(stroki):
-        s = stroki[i]
-        i += 1
-        if prikleit and out:
-            out[-1] += " " + s                          # `"$(cat <<EOF … EOF)" && ssh …` — команда продолжается
+def grubye_segmenty(cmd):
+    chasti = GRUBYJ_RAZREZ.split(re.sub(r"\\\r?\n", " ", cmd))
+    segs, razd = [], ""
+    for k, chast in enumerate(chasti):
+        if k % 2:
+            razd = chast                                # нечётные — сами разделители
         else:
-            out.append(s)
-        prikleit = False
-        logich.append(s)
-        ozhidayut.extend((len(logich) - 1, m) for m in _heredoc_operatory(s, stek))
-        if (len(s) - len(s.rstrip("\\"))) % 2 == 1 and not (stek and stek[-1] == "'"):
-            continue                                    # перенос `\` — логическая строка продолжается
-        if ozhidayut:
-            tekst = "\n".join(logich)
-            for nomer, m in ozhidayut:
-                pered = "\n".join(logich[:nomer] + [logich[nomer][:m.start()]])
-                tabs, konec = m.group(1) == "-", m.group(3)
-                j, telo, najdeno = i, [], False
-                while j < len(stroki):
-                    stroka = stroki[j]
-                    j += 1
-                    if (stroka.lstrip("\t") if tabs else stroka) in (konec, konec + ")", konec + ')"'):
-                        najdeno = True                  # `EOF)` bash тоже принимает как конец внутри $( )
-                        break
-                    telo.append(stroka)
-                if not najdeno:
-                    break                               # нет закрывающей метки — ничего не выкидываем
-                if _telo_komandy(tekst, pered):
-                    out.extend(bez_tel_heredoc("\n".join(telo)).split("\n"))   # команды; вложенные тела — тоже
-                    out.append("")                      # граница: тело закончилось
-                else:
-                    prikleit = bool(stek)               # внутри "$( … )": строка после метки — та же команда
-                    if not prikleit:
-                        out.append("")
-                i = j
-            ozhidayut = []
-        if not stek:
-            logich = []
-    return "\n".join(out)
+            segs.append((chast, razd))
+    return segs
 
 def changes_infra(cmd):
-    """Ищет изменяющую команду посегментно, пропуская read-only обёртки."""
-    cmd = bez_tel_heredoc(cmd)                         # сначала: `\` в теле heredoc — не продолжение строки
-    cmd = re.sub(r"\\\r?\n", " ", cmd)                 # продолжение строки обратной косой — как в bash
-    cmd = re.sub(r"\|[ \t]*\r?\n\s*", "| ", cmd)       # канал, перенесённый на новую строку
-    cwd = None
-    for seg, razd in razbit(cmd):
-        piped = razd == "|"
-        probe = PREFIX_RE.sub("", seg).strip()
-        sama = komanda(probe)
-        mcd = re.match(r"^cd\s+(\S+)", sama)
-        if mcd:                                         # `cd /opt/app && echo X >> .env`
-            cel = put(mcd.group(1), cwd)
-            cwd = cel if cel.startswith("/") and not VREMENNOE.match(cel) else None
-        if zapis_perenapravleniem(seg, cwd):
-            return probe or seg.strip()
-        if not probe or READONLY_LEAD.match(sama):
-            continue
-        if (CHANGE_RE.search(probe) or crontab_changes(probe, piped) or pishet_v_konfig(probe, cwd)
-                or zapusk_obertki(probe) or git_na_servere(probe, cwd)):
-            return probe
-    return None
+    """Ищет изменяющую команду в двух чтениях (см. выше), пропуская read-only сегменты."""
+    tochnyj = re.sub(r"\\\r?\n", " ", cmd)             # продолжение строки обратной косой — как в bash
+    tochnyj = re.sub(r"\|[ \t]*\r?\n\s*", "| ", tochnyj)   # канал, перенесённый на новую строку
+    return _po_segmentam(razbit(tochnyj), True) or _po_segmentam(grubye_segmenty(cmd), False)
 
 changed, updated = [], False
 for rec in turn:

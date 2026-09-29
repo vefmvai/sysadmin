@@ -8,7 +8,9 @@ set -uo pipefail
 # где замок исправен. Правило 3д свода замков.
 export PYTHONIOENCODING=utf-8
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
-HOOK="$HERE/inventory-sync-guard.sh"
+# GUARD=<скрипт> — проверить другую версию хука (историческую или испорченную): тест, который
+# не краснеет на сломанной версии, ничего не доказывает (персона §3.11, свод замков правило 1).
+HOOK="${GUARD:-$HERE/inventory-sync-guard.sh}"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 # Метки предохранителя кладём в свой TMPDIR: иначе они переживают прогон и следующий
 # запуск тестов «пропускает» блокировки (метка = один блок на ход). Заодно не задеваем
@@ -297,10 +299,13 @@ for c in \
   check pass "не правка: ${c:0:60}" "$TMP/r2ro$n.jsonl"
 done
 
-echo "[2е] Тело heredoc — данные, если его читает не оболочка (25.09.2026)"
-# Ложные остановки в самой сессии правки замка: текст коммита `git commit -F - <<EOF` с
-# упоминанием `ufw default` и `git pull` принимался за команды. Командами тело бывает, только
-# если его читает оболочка — ssh без команды, `bash -s`, `sudo -s`.
+echo "[2е] Текст с командой внутри — останавливает: цена правила 4 (решение оператора 25.07.2026)"
+# Первая версия PR #19 выкидывала тело heredoc «у известного читателя» и не останавливала на
+# тексте коммита с `ufw default`. Проверка мейнтейнера 26.09.2026: то же исключение пропускало
+# настоящие правки (`while read c; do ssh h "$c"; done <<EOF`, `bash /dev/stdin <<EOF`, записал
+# скрипт и выполнил). Замки не отличают упоминание от исполнения намеренно: лишняя остановка —
+# одна реплика «инфраструктура не менялась», пропуск — разошедшийся inventory. Эти случаи
+# краснеют, если исключение «это же текст» вернут.
 n=0
 for c in \
   $'git commit -q -F - <<\'EOF\'\nfix: ufw default deny, systemctl edit x, git pull в /opt/app\nsudo cp x /etc/nginx/nginx.conf\nEOF' \
@@ -309,7 +314,7 @@ for c in \
   $'cat > run.sh <<\'EOF\'\n#!/usr/bin/env bash\ndocker compose up -d\nEOF' \
   $'python - <<\'PY\'\nprint("mv /etc/x /root/y")\nPY'; do
   n=$((n+1)); mk "$TMP/hdro$n.jsonl" "Bash:$c"
-  check pass "тело — данные: ${c:0:50}" "$TMP/hdro$n.jsonl"
+  check block "текст с командой: ${c:0:50}" "$TMP/hdro$n.jsonl"
 done
 n=0
 for c in \
@@ -346,8 +351,70 @@ for c in \
   $'gh pr create --title "fix(hooks): x" \\\n  --body-file - <<\'EOF\'\n- ufw default deny incoming\nEOF' \
   $'PYTHONIOENCODING=utf-8 python - "$(cygpath -m x.py)" <<\'PYEOF\'\nprint("mv /etc/x /root/y")\nPYEOF'; do
   n=$((n+1)); mk "$TMP/hdro2$n.jsonl" "Bash:$c"
-  check pass "тело — данные (формы проверки): ${c:0:40}" "$TMP/hdro2$n.jsonl"
+  check block "текст с командой (формы): ${c:0:40}" "$TMP/hdro2$n.jsonl"
 done
+
+echo "[2ж] Не хуже старого: что ловил хук до 25.09.2026, ловится и сейчас (проверка 26.09.2026)"
+# Первая версия PR #19 закрыла много дыр — и незаметно открыла 17 новых: правила стали точнее,
+# а старое грубое правило ловило эти формы, пусть и случайно (правило 3а свода замков). Каждый
+# случай проверяется парой: хук из истории git (25424f7) обязан остановить — иначе случай ничего
+# не доказывает, — и нынешний тоже. Первая строка берётся из скилла rotate-secrets, не из головы.
+SKILL_ACME="$(sed -n "s/^[[:space:]]*\(ssh .*acme\.sh --renew.*\)\$/\1/p" "$HERE/../skills/rotate-secrets/SKILL.md" | head -1)"
+if [ -z "$SKILL_ACME" ]; then
+  FAIL=$((FAIL+1)); echo "  ❌ потерян источник: в rotate-secrets/SKILL.md нет строки ssh … acme.sh --renew"
+fi
+n=0
+for c in \
+  "$SKILL_ACME" \
+  $'ssh prod \'/root/.acme.sh/acme.sh --issue -d x.kz --standalone\'' \
+  $'ssh prod \'sudo /usr/bin/certbot renew --force-renewal\'' \
+  $'ssh prod \'sudo nginx -t\ngrep -n listen /etc/nginx/nginx.conf\' && ssh prod \'sudo systemctl reload nginx\'' \
+  $'for h in a b; do ssh $h \'sudo /opt/infra/deploy.sh\'; done' \
+  $'if ./scripts/deploy.sh prod; then echo ok; fi' \
+  $'{ ./scripts/deploy.sh prod; } 2>&1 | tee /tmp/deploy.log' \
+  $'ssh prod bash -s production < scripts/deploy.sh' \
+  $'! ./update.sh || echo fail' \
+  $'ssh "$H" \'curl -fsS localhost/health; echo x | sudo tee /etc/nginx/conf.d/a.conf\'' \
+  $'ssh prod -t \'curl -s localhost; echo x | sudo tee /etc/nginx/conf.d/a.conf\'' \
+  $'ssh prod echo "start; sudo systemctl restart nginx"' \
+  $'cat > /tmp/fix.sh <<\'EOF\'\nsudo cp /tmp/x.conf /etc/nginx/nginx.conf\nsudo systemctl reload nginx\nEOF\nscp /tmp/fix.sh prod:/tmp/ && ssh prod \'bash /tmp/fix.sh\'' \
+  $'ssh prod \'cat > /tmp/f.sh && sudo bash /tmp/f.sh\' <<\'EOF\'\nsystemctl restart nginx\nEOF' \
+  $'while read -r c; do ssh prod "$c"; done <<\'EOF\'\nsudo systemctl restart nginx\nEOF' \
+  $'bash /dev/stdin prod <<\'EOF\'\nssh prod \'sudo systemctl restart nginx\'\nEOF' \
+  $'ssh prod \'sudo bash /dev/stdin\' <<\'EOF\'\nsystemctl restart nginx\nEOF'; do
+  [ -n "$c" ] || continue
+  n=$((n+1))
+  if [ -s "$OLD_HOOK" ]; then
+    # Отдельные транскрипты: метка «один блок на ход» опознаёт ход по имени файла.
+    mk "$TMP/nw-old$n.jsonl" "Bash:$c"
+    SAVED_HOOK="$HOOK"; HOOK="$OLD_HOOK"
+    check block "старый ловил: ${c:0:55}" "$TMP/nw-old$n.jsonl"
+    HOOK="$SAVED_HOOK"
+  fi
+  mk "$TMP/nw$n.jsonl" "Bash:$c"
+  check block "и нынешний ловит: ${c:0:50}" "$TMP/nw$n.jsonl"
+done
+
+echo "[2з] Длинная команда разбирается за линейное время (26.09.2026)"
+# Разбор кавычек склеивал весь буфер на каждой кавычке: 8000 пар — 5,4 с, 20000 — 125 с при
+# таймауте хука 20 с, и хук молча пропускал. Здесь 16000 пар и правка в конце: исправный
+# разбор укладывается в доли секунды, квадратичный не уложится в 5 с и на быстрой машине.
+LONG="$(python3 -c 'print(" ".join(["echo \"a\" \"b\""] * 8000) + "; sudo systemctl restart nginx")')"
+mk "$TMP/long.jsonl" "Bash:$LONG"
+LONG_V="$(python3 - "$TMP/long.jsonl" "$HOOK" "$MARKS" <<'PY'
+import json, os, subprocess, sys
+tr, hook, marks = sys.argv[1:4]
+inp = json.dumps({"session_id": "long", "cwd": "/tmp/p", "transcript_path": tr, "stop_hook_active": False})
+try:
+    r = subprocess.run(["bash", hook], input=inp, capture_output=True, text=True, timeout=5,
+                       env=dict(os.environ, TMPDIR=marks, PYTHONIOENCODING="utf-8"))
+    print("block" if '"decision": "block"' in r.stdout else "pass")
+except subprocess.TimeoutExpired:
+    print("timeout")
+PY
+)"
+if [ "$LONG_V" = "block" ]; then PASS=$((PASS+1)); echo "  ✅ 16000 пар кавычек — разобрано за 5 с, правка найдена"
+else FAIL=$((FAIL+1)); echo "  ❌ 16000 пар кавычек: ${LONG_V:-пусто} — разбор не линейный или правка потеряна"; fi
 
 echo "[2] Изменение без обновления inventory — останавливаем"
 mk "$TMP/change1.jsonl" "Bash:ssh prod-host 'docker compose up -d academii'"
