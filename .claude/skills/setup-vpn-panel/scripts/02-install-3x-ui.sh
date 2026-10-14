@@ -97,7 +97,7 @@ sleep 3
 # ─── Проверка, что креды применились ──────────────────────────────────────────
 echo "[install] Проверка применения кредов..."
 
-SETTING_OUTPUT="$(ssh "$SSH_TARGET" "/usr/local/x-ui/x-ui setting -show true" 2>&1)"
+SETTING_OUTPUT="$(MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' ssh "$SSH_TARGET" "/usr/local/x-ui/x-ui setting -show true" 2>&1)"
 
 # Парсим вывод (формат у разных версий может слегка отличаться)
 APPLIED_PORT="$(echo "$SETTING_OUTPUT" | grep -iE "(panel|port)" | grep -oE '[0-9]{4,5}' | head -n1)"
