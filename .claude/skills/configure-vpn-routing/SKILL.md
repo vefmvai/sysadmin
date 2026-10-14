@@ -2,7 +2,7 @@
 name: configure-vpn-routing
 description: |
   Настройка VPN-маршрутизации на установленной панели 3X-UI: inbound для клиентов
-  (VLESS-TCP для ru-server, VLESS+Reality для foreign-server), outbound через
+  (VLESS + TLS для ru-server, VLESS+Reality для foreign-server), outbound через
   подписку провайдера (сервера — из уже извлечённого `/extract-subscription-servers`
   JSON; извлечением сам НЕ занимается; оператор выбирает страну выхода и пресет) ИЛИ
   через свой загр.VPS; balancer leastPing + observatory (probeInterval=5m, стабильный
@@ -87,9 +87,9 @@ inbound для клиентов, outbound (через подписку пров�
 | `PROBE_INTERVAL` | нет | `5m` | Как часто observatory переоценивает серверы. 5m (не 1m) = стабильнее IP |
 | `UPSTREAM_VPN_URL` | условно | — | Прямой vless://-link (вместо subscription URL или для `self-foreign`) |
 | `INBOUND_PORT` | нет | `443` | Порт inbound на сервере |
-| `INBOUND_PROTOCOL` | нет | авто из `vpn.server_role` | `vless-tcp` (ru-server) / `vless-reality` (foreign-server). Если роль не зафиксирована — уточняется у оператора (Шаг 4) |
+| `INBOUND_PROTOCOL` | нет | авто из `vpn.server_role` | `vless-tls` (ru-server) / `vless-reality` (foreign-server) / `vless-tcp` (без TLS — только частный адрес, `CONFIRM_PLAIN_VLESS=yes`, ADR-0045). Если роль не зафиксирована — уточняется у оператора (Шаг 4) |
 | `SERVER_ROLE` | нет | из `vpn.server_role` | `ru-server` / `foreign-server`. Источник правды для протокола и guard'а. Если null — спрашиваю |
-| `INBOUND_FLOW` | нет | `xtls-rprx-vision` для reality / пусто для tcp | Flow для VLESS |
+| `INBOUND_FLOW` | нет | `xtls-rprx-vision` для reality / пусто для tls и tcp | Flow для VLESS |
 | `INBOUND_ONLY` | нет | `false` | Если `true` — создать только inbound, без outbound/routing (для подготовки загр.VPS) |
 | `CLIENT_NAMES` | нет | `["main"]` | JSON-массив имён клиентов |
 | `BALANCER_STRATEGY` | нет | `leastPing` | `random` / `roundRobin` / `leastPing` / `leastLoad` |
@@ -145,11 +145,11 @@ REPORT_LANGUAGE=$(get_agent_field '.operator.language' '.language' ru)
 SERVER_ROLE=$(get_config_field vpn.server_role "")
 
 # Авто-вывод протокола inbound из роли сервера (CLI override имеет приоритет):
-#   ru-server      → vless-tcp   (вход внутри РФ, TSPU не пересекается, Reality НЕ нужен)
+#   ru-server      → vless-tls   (вход внутри РФ: Reality НЕ нужен, TLS нужен — ADR-0045)
 #   foreign-server → vless-reality (трансграничный вход, маскировка обязательна)
 if [ -z "${INBOUND_PROTOCOL:-}" ]; then
     case "$SERVER_ROLE" in
-        ru-server)      INBOUND_PROTOCOL="vless-tcp" ;;
+        ru-server)      INBOUND_PROTOCOL="vless-tls" ;;
         foreign-server) INBOUND_PROTOCOL="vless-reality" ;;
         *)              INBOUND_PROTOCOL="" ;;   # роль неизвестна — уточнить на Шаге 4
     esac
@@ -217,7 +217,10 @@ Login через `api_login` — пароль читается из менедж
 
 Если `INBOUND_ONLY=true` или у панели ещё нет vless-inbound — `scripts/create-vless-inbound.sh`
 создаёт inbound. Протокол по умолчанию выводится **автоматически из `vpn.server_role`** (Шаг 0a):
-- `ru-server` → **VLESS-TCP** (вход внутри РФ, TSPU не пересекается — маскировка штатно не нужна).
+- `ru-server` → **VLESS + TLS** (вход внутри РФ, TSPU не пересекается — маскировка не нужна, но TLS нужен:
+  клиенты на Xray-core 26.7.11+ VLESS без TLS к публичному адресу не собирают, а без TLS UUID идёт
+  открытым текстом; сертификат — домена панели, пути из настроек панели или `TLS_CERT_FILE`/`TLS_KEY_FILE`;
+  ADR-0045). VLESS без TLS (`vless-tcp`) — только к частному адресу и по `CONFIRM_PLAIN_VLESS=yes`.
 - `foreign-server` → **VLESS+Reality** (трансграничный вход; генерирует keypair, выбирает shortId).
 
 **Если `SERVER_ROLE` пуст** (роль не зафиксирована — старый конфиг или установка
@@ -225,7 +228,7 @@ Login через `api_login` — пароль читается из менедж
 сеньор-обёртку и спрашиваю оператора прямым вопросом: «Сервер с панелью — в РФ или
 за границей?» По ответу выставляю `SERVER_ROLE` и протокол, **и дописываю
 `vpn.server_role` в конфиг** (чтобы впредь не спрашивать). Дефолт при сомнении —
-`ru-server` + `vless-tcp`.
+`ru-server` + `vless-tls`.
 
 Запуск скрипта **всегда** с `SERVER_ROLE`:
 
@@ -237,12 +240,19 @@ INBOUND_LISTEN_PORT="$INBOUND_PORT" \
 ```
 
 > 🧑‍🏫 **Reality на РФ-сервере — менторская развилка, не запрет.** Дефолт для
-> `ru-server` — `vless-tcp` (внутри РФ TSPU не пересекается, маскировать нечего).
+> `ru-server` — `vless-tls` (внутри РФ TSPU не пересекается, маскировать нечего; TLS — шифрование).
 > Если оператор осознанно хочет Reality на РФ-inbound (эксперимент/учёба) — не
 > обрываю, объясняю почему обычно не нужно, уточняю «точно хочешь?», и при
 > подтверждении повторяю запуск с `CONFIRM_REALITY_ON_RU=yes`. Guard в
 > `create-vless-inbound.sh` (exit 3) ловит только СЛУЧАЙНУЮ подстановку. Полный
 > менторский сценарий — `references/pitfalls.md`; рефлекс персоны 3.8.5.
+
+**Сервер уже с входом без TLS (переезд, ADR-0045).** Старый вход не трогаю — на нём
+живые устройства. Создаю `vless-tls` на **отдельном** порту (за nginx stream — на
+loopback), в карте `stream` веду имя домена на новый upstream, старый вход остаётся на
+`default`, пока устройства не перейдут на новые ссылки (`/generate-client-config`).
+Схема и грабли `default` — `knowledge/networking/_reference/web-and-vpn-coexistence.md`
+(SNI-развилка). Правка nginx — отдельный пункт брифинга.
 
 При создании — сразу один client_uuid для первичного клиента (имя из
 `CLIENT_NAMES[0]` или `admin`).
@@ -454,9 +464,18 @@ api_update_xray_config "$BACKUP_CONFIG_JSON" && api_restart_xray
   Enforced: `setup-routing.sh` делает exit 3 при >1 страны без
   `CONFIRM_MULTI_COUNTRY=yes`. Рефлекс 3.8.6, ADR-0011.
 - **НЕ ставить Reality на РФ-inbound по своей инициативе** — внутри РФ TSPU не
-  пересекается, маскировать нечего; дефолт `vless-tcp`. Reality на РФ — только по
+  пересекается, маскировать нечего; дефолт `vless-tls`. Reality на РФ — только по
   осознанному `CONFIRM_REALITY_ON_RU=yes` после менторского объяснения. Guard в
   `create-vless-inbound.sh` (exit 3) ловит случайную подстановку. Рефлекс 3.8.5.
+- **НЕ создавать VLESS без TLS к публичному адресу — ни входом, ни исходящим.** Клиенты
+  на Xray-core 26.7.11+ такой вход не собирают; исходящее без TLS на сервере после
+  обновления xray не даёт ядру стартовать целиком. Enforced: `create-vless-inbound.sh`
+  (`vless-tcp`) и `add-outbound-from-vless.sh` (ссылка без `tls`/`reality`) — exit 3 без
+  `CONFIRM_PLAIN_VLESS=yes`, осмысленного только для частного адреса. Проверять ядром
+  **клиента**: серверное обычно старше и дефекта не видит. ADR-0045. Регресс (оба замка,
+  сборка `vless-tls`, пути сертификата под Git Bash/MSYS) — офлайновый
+  `tests/test-vless-inbound-guards.sh`; прогон:
+  `bash .claude/skills/configure-vpn-routing/tests/test-vless-inbound-guards.sh`.
 - **Sticky-порога «N мс» в серверном балансире 3X-UI НЕТ** — это клиентская
   настройка sing-box (`urltest.tolerance`). НЕ вписывать несуществующее поле
   (правило №1). Стабильность IP = одна страна + `probeInterval=5m`.

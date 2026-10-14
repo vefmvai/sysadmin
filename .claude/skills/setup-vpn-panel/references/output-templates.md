@@ -42,8 +42,8 @@ Inventory:
 
 > 🔒 **`server_role` — источник правды для выбора протокола.** Записывается
 > здесь по выбранному `$LOCATION` (Шаг 1). `/configure-vpn-routing` читает это
-> поле и автоматически выводит протокол inbound: `ru-server → vless-tcp` (без
-> Reality), `foreign-server → vless-reality`. На нём же стоит guard в
+> поле и автоматически выводит протокол inbound: `ru-server → vless-tls` (без
+> Reality, ADR-0045), `foreign-server → vless-reality`. На нём же стоит guard в
 > `create-vless-inbound.sh` — Reality на `ru-server` блокируется на уровне кода.
 
 ---

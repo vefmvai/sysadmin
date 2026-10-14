@@ -20,7 +20,7 @@ flowchart TD
       Router -->|"🔵 youtube, chatgpt,<br/>github, всё остальное"| Up["⬆️ outbound upstream"]
     end
 
-    RuVPS["вход: VLESS-TCP inbound"] --> Router
+    RuVPS["вход: VLESS + TLS inbound"] --> Router
 
     Direct["☁️ outbound direct<br/>(с IP сервера, РФ)<br/><br/>🔒 РФ-сайт видит российский IP<br/>сервера — не банит"]
 

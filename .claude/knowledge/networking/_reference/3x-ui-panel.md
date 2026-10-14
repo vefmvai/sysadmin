@@ -53,7 +53,7 @@ flowchart LR
     PROG[Программы<br/>на сервере] -->|SOCKS5 без auth| IN2
 
     subgraph Panel[3X-UI на VPS оператора]
-      IN1[Inbound: vless-tcp<br/>:443, UUID-список]
+      IN1[Inbound: vless + TLS<br/>:443, UUID-список]
       IN2[Inbound: mixed<br/>127.0.0.1:1080]
       ROUTING[Routing rules<br/>geosite:ru → direct<br/>остальное → upstream]
       OUT_D[Outbound: direct]
@@ -74,7 +74,8 @@ flowchart LR
 3X-UI поддерживает множество inbound и множество outbound одновременно.
 Типовая боевая конфигурация:
 
-- **Inbound 1** — VLESS-TCP на 443, для клиентов-устройств (Hiddify/Karing
+- **Inbound 1** — VLESS + TLS на 443 (сертификат домена панели; без TLS клиенты на
+  Xray-core 26.7.11+ не подключатся — `vpn-protocols.md` §6.8), для клиентов-устройств (Hiddify/Karing
   на iPhone, Hiddify/NekoBox на Android, sing-box/Hiddify на desktop).
   Множество clients (UUID на устройство-человека-роль).
 - **Inbound 2** — mixed на 127.0.0.1:1080, для программ на этом же сервере.

@@ -496,7 +496,7 @@ VLESS + TCP + REALITY + xtls-rprx-vision + uTLS(chrome или firefox)
 │       └── UDP — риск блокировки в РФ-2026
 ├── Цель — multi-hop через свой RU-VPS
 │   ├── RU-VPS → загр.VPS outbound: VLESS+Reality или SS2022 (DC-to-DC режется мягче)
-│   └── Клиент → RU-VPS: внутри РФ, маскировка не нужна — голый VLESS-TCP
+│   └── Клиент → RU-VPS: внутри РФ, маскировка не нужна — VLESS + TLS (не голый: vpn-protocols.md §6.8)
 └── Цель — CDN-fronting (за Cloudflare Workers)
     └── WebSocket — единственный совместимый транспорт
 ```

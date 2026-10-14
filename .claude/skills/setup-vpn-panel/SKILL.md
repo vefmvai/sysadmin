@@ -7,7 +7,7 @@ description: |
   нестандартный порт + случайный webBasePath), выпуск Let's Encrypt сертификата
   (3 метода: acme-standalone / acme-cloudflare / certbot), настройка UFW,
   запись секретов в менеджер паролей оператора, обновление inventory.
-  Поддерживает два расположения сервера: ru-server (VLESS-TCP inbound) и
+  Поддерживает два расположения сервера: ru-server (VLESS + TLS inbound) и
   foreign-server (VLESS+Reality inbound с валидацией serverName).
   Триггеры: «настрой VPN-панель», «поставь 3X-UI», «нужен свой VPN»,
   «хочу обойти блокировки на VPS», «setup 3x-ui», «свой VLESS на сервере».
@@ -156,7 +156,7 @@ REPORT_LANGUAGE=$(get_agent_field '.operator.language' '.language' ru)
 1. **Контекст**: «У тебя сейчас один (или два) сервера? Один в РФ, другой за границей?»
 2. **Мини-урок** (2-3 абзаца): «Если сервер в РФ — клиенты ходят на него внутри
    РФ, TSPU не работает на этом маршруте, маскировка не нужна, используем
-   VLESS-TCP без Reality. Если сервер за границей — трафик клиент→сервер
+   VLESS + TLS без Reality (сертификат — тот же, что выпускаем для панели). Если сервер за границей — трафик клиент→сервер
    пересекает TSPU, маскировка обязательна, VLESS+Reality на 443.»
 3. **Варианты**: ru-server / foreign-server.
 4. **Рекомендация**: исходя из ответа оператора.
@@ -330,7 +330,7 @@ macOS, аналогично для других).
 
 > 🔒 **`server_role` — источник правды для выбора протокола.** Записывается здесь по
 > выбранному `$LOCATION` (Шаг 1). `/configure-vpn-routing` читает это поле и выводит
-> протокол inbound: `ru-server → vless-tcp` (без Reality), `foreign-server → vless-reality`.
+> протокол inbound: `ru-server → vless-tls` (без Reality, ADR-0045), `foreign-server → vless-reality`.
 > На нём же стоит guard в `create-vless-inbound.sh` — Reality на `ru-server` блокируется
 > на уровне кода.
 
