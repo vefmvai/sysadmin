@@ -71,7 +71,9 @@ CURRENT_CONFIG="$(echo "$CURRENT_CONFIG_RESPONSE" | jq '.obj')"
 # Формируем streamSettings под security
 if [ "$SECURITY" = "reality" ]; then
     [ -z "$PBK" ] && { echo "ERROR: для reality нужен pbk (public key) в VLESS_JSON" >&2; exit 1; }
-    STREAM_SETTINGS="$(jq -nc \
+    # spiderX («/» по умолчанию) — путь на чужом сервере; под Git Bash нативный jq получил
+    # бы «C:/Program Files/Git/». Локальных путей в вызове нет. msys-path-conversion.md
+    STREAM_SETTINGS="$(MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' jq -nc \
         --arg sni "$SNI" \
         --arg fp "${FP:-chrome}" \
         --arg pbk "$PBK" \
