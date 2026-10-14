@@ -226,7 +226,7 @@
         "server_role": {
           "type": ["string", "null"],
           "enum": ["ru-server", "foreign-server", null],
-          "description": "Расположение сервера с панелью. ru-server — VPS в РФ (inbound ВСЕГДА VLESS-TCP без Reality). foreign-server — заграничный VPS (inbound VLESS+Reality обязателен). Заполняется /setup-vpn-panel. Источник правды для /configure-vpn-routing и guard'а 'Reality на РФ-сервере запрещён'. null — роль не зафиксирована."
+          "description": "Расположение сервера с панелью. ru-server — VPS в РФ (inbound VLESS + TLS без Reality, ADR-0045; VLESS без TLS — только к частному адресу и по подтверждению). foreign-server — заграничный VPS (inbound VLESS+Reality обязателен). Заполняется /setup-vpn-panel. Источник правды для /configure-vpn-routing и guard'а 'Reality на РФ-сервере запрещён'. null — роль не зафиксирована."
         },
         "server_proxy_enabled": {
           "type": "boolean",
