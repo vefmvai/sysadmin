@@ -10,7 +10,7 @@
 
 | Файл | О чём | Кто потребитель |
 |---|---|---|
-| [`_reference/claude-code-transcript.md`](_reference/claude-code-transcript.md) | как отличить голос человека от вставок движка в `.jsonl` | `red-zone-guard.sh`, `inventory-sync-guard.sh`, разбор сессий |
+| [`_reference/claude-code-transcript.md`](_reference/claude-code-transcript.md) | как отличить голос человека от вставок движка в `.jsonl`; какая сессия «своя» (`cwd`, номер сессии у субагента — родителя); как искать по журналам, не положив машину, и почему прошлый отчёт субагенту передают в задании | `red-zone-guard.sh`, `inventory-sync-guard.sh`, разбор сессий |
 | [`_reference/building-enforcement.md`](_reference/building-enforcement.md) | как строить замок, чтобы он работал: живой тест в обе стороны, тест из источника, конфликт разделителя, почему ложные срабатывания — цена, а не дефект | всякий, кто добавляет хук / линтер / гейт (`/dev`) |
 
 **Читать по одному файлу, а не оба сразу.** Пишешь код, который разбирает реплики
