@@ -258,6 +258,9 @@ sysadmin/                          ← публичный репо (этот). �
 │                                     («JSON разбирается» ≠ «схема работает»). Нужен jsonschema:
 │                                     python3 -m venv .venv && ./.venv/bin/python3 -m pip install jsonschema
 │                                     — тест сам перезапустится в .venv (или в SYSADMIN_VENV)
+│   ├── check-causal-provenance.sh ← мягкий замок: «почему» в inventory/ и incidents/ инфры —
+│                                     с пометкой источника; предупреждает, не блокирует (ADR-0046)
+│   ├── test-causal-provenance.sh  ← его тест: 51 проверка, устройство исторического дефекта
 │   └── run-evals.sh               ← прогон evals/triggers.md по скиллам
 ├── docs/archive/                  ← исторические артефакты (docs/archive/README.md)
 │
