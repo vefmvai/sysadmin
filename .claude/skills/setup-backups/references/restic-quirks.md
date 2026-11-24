@@ -17,6 +17,38 @@ multipart-огрызков) — в соседнем `pipeline-pitfalls.md`. Зд
 | Backblaze B2 | `b2:<bucket>:backups/infra` | `B2_ACCOUNT_ID` + `B2_ACCOUNT_KEY` в env |
 | WebDAV (Я.Диск / NextCloud / ownCloud) | `rclone:<remote>:backups/infra` | `rclone config` с типом webdav и endpoint провайдера |
 | S3-совместимое (MinIO / Wasabi / Yandex Object Storage) | `s3:<endpoint>/<bucket>/backups/infra` | те же `AWS_*` env, endpoint подменён |
+| Свой сервер по SFTP | `sftp:<host>:<путь>` | ssh-ключ на источнике + запись ключа в `authorized_keys` приёмника + `known_hosts` источника |
+
+### Свой сервер по SFTP
+
+Приёмник — не облако, а вторая машина: у неё нет ни ключей доступа, ни rclone, а вместо
+них — обычный SSH. Отсюда пять граблей, каждая тихая.
+
+- **Путь внутри chroot считается от корня chroot.** Запертая учётка бэкапа обычно живёт
+  под `ChrootDirectory /var/sftp/repo`; тогда репозиторий `/var/sftp/repo/data` в URL
+  пишется как `sftp:<host>:/data`, а не полным путём приёмника. Полный путь даёт
+  `unable to open repository` при живом и исправном канале.
+- **Каталог chroot обязан принадлежать root и не быть доступным на запись группе/всем** —
+  требование sshd, не restic. Значит, сам репозиторий кладётся в ПОДКАТАЛОГ, владелец
+  которого — учётка бэкапа. Иначе `restic init` упрётся в отказ на запись.
+- **`ssh <host>` шелла не даст, и это норма.** У запертой учётки `ForceCommand internal-sftp`;
+  проверять доступ надо `sftp -b /dev/null <host>`, а не `ssh <host> true` — иначе примешь
+  исправный канал за сломанный.
+- **`known_hosts` заполняется заранее, под тем пользователем, от которого пойдёт бэкап.**
+  restic под cron/systemd запускается обычно от root и в неинтерактивном режиме: вопрос
+  «доверять ли ключу хоста?» задать некому, задание молча падает. Первое подключение —
+  руками, либо `ssh-keyscan` в `/root/.ssh/known_hosts`.
+- **Параметры соединения держи в `~/.ssh/config` ТОГО пользователя, от которого пойдёт
+  задание** (обычно root): алиас, `IdentityFile`, `Port`, `BatchMode yes`. В конфиг инфры
+  идёт только алиас — это единственный источник правды, поэтому в схеме и нет поля под
+  ключ: «поле, которое читается, но никуда не применяется» опаснее его отсутствия.
+  restic не пробрасывает ssh-флаги; всё, что не прописано в ssh-конфиге, пришлось бы
+  передавать через `-o sftp.args` в КАЖДОМ вызове, и это первое, что забывается.
+
+> **SFTP-приёмник — это не offsite.** Копия на второй машине в том же здании переживает
+> смерть диска и кривой деплой, но не пожар, не затопление и не шифровальщика, добравшегося
+> до обеих машин. Если это единственная копия — скажи оператору прямо и предложи третий
+> уровень в облако.
 
 ### WebDAV-хранилища через rclone (Яндекс.Диск, NextCloud, ownCloud)
 
@@ -91,7 +123,8 @@ multipart-огрызков) — в соседнем `pipeline-pitfalls.md`. Зд
 
 | Ошибка | Причина | Решение |
 |--------|---------|---------|
-| `unable to open repository` | Wrong RESTIC_REPOSITORY URL | Проверь rclone config / S3 endpoint |
+| `unable to open repository` | Wrong RESTIC_REPOSITORY URL | Проверь rclone config / S3 endpoint; для sftp — путь считается от корня chroot |
+| `Permission denied (publickey)` в задании cron/systemd | ключ или `known_hosts` есть у оператора, но не у пользователя задания | Проверь от имени того же пользователя: `sudo -u <кто> sftp -b /dev/null <host>` |
 | `wrong password or no key found` | Wrong RESTIC_PASSWORD | Используй password-file |
 | `repository does not exist` | Не сделан `restic init` | `restic init` один раз на репозиторий |
 | `Lock failed` | Параллельный backup | Дождись завершения или `restic unlock` |

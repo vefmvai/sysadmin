@@ -174,6 +174,49 @@ CASES = [
                         "retention": {"daily": 7, "weekly": 4, "monthly": 6}}),
         False,
     ),
+    (
+        "[дефект] бэкапы на свой сервер по SFTP — законный приёмник",
+        mutate(backups={"enabled": True, "destination": "sftp",
+                        "retention": {"daily": 7, "weekly": 4, "monthly": 6},
+                        "sftp": {"host": "backup-host", "path": "/repo"}}),
+        True,
+    ),
+    (
+        "бэкапы на SFTP, но приёмник не описан",
+        mutate(backups={"enabled": True, "destination": "sftp",
+                        "retention": {"daily": 7, "weekly": 4, "monthly": 6}}),
+        False,
+    ),
+    (
+        "приёмник SFTP описан, но без пути репозитория",
+        mutate(backups={"enabled": True, "destination": "sftp",
+                        "retention": {"daily": 7, "weekly": 4, "monthly": 6},
+                        "sftp": {"host": "backup-host"}}),
+        False,
+    ),
+    (
+        "в блоке SFTP поле, которого схема не знает (опечатка в имени)",
+        mutate(backups={"enabled": True, "destination": "sftp",
+                        "retention": {"daily": 7, "weekly": 4, "monthly": 6},
+                        "sftp": {"host": "backup-host", "path": "/repo",
+                                 "identityfile": "/root/.ssh/backup_ed25519"}}),
+        False,
+    ),
+    (
+        "приёмник SFTP с отдельным пользователем — норма",
+        mutate(backups={"enabled": True, "destination": "sftp",
+                        "retention": {"daily": 7, "weekly": 4, "monthly": 6},
+                        "sftp": {"host": "backup-host", "path": "/repo", "user": "restic_user"}}),
+        True,
+    ),
+    (
+        "[дефект] путь к ssh-ключу в конфиге — поле убрано намеренно (оно ничего не применяло)",
+        mutate(backups={"enabled": True, "destination": "sftp",
+                        "retention": {"daily": 7, "weekly": 4, "monthly": 6},
+                        "sftp": {"host": "backup-host", "path": "/repo",
+                                 "identity_file": "/root/.ssh/backup_ed25519"}}),
+        False,
+    ),
 
     # --- серверы ---
     (
