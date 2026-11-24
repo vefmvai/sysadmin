@@ -27,7 +27,8 @@
 # ВАЖНО (guard 2): vless-tcp без TLS к публичному адресу клиенты на Xray-core
 #   26.7.11+ не собирают («vless without TLS or other encryption is prohibited…»),
 #   а UUID клиента идёт по сети открытым текстом. Создаётся только по
-#   CONFIRM_PLAIN_VLESS=yes — для частной сети (LAN, Tailscale). ADR-0045.
+#   CONFIRM_PLAIN_VLESS=yes — для частной сети (10/8, 172.16/12, 192.168/16;
+#   Tailscale 100.64/10 частным не считается). ADR-0045.
 #
 # ВАЖНО (guard): vless-reality на ru-server обычно избыточен. Маршрут «клиент в
 #   РФ → сервер в РФ» не пересекает TSPU, маскировка чаще всего ни от чего не
@@ -74,7 +75,8 @@ if [ "$INBOUND_PROTOCOL" = "vless-tcp" ] && [ "$CONFIRM_PLAIN_VLESS" != "yes" ];
   идёт по сети открытым текстом. Штатный вариант — INBOUND_PROTOCOL=vless-tls
   (сертификат домена панели).
 
-  Осмысленно только для частного адреса (локальная сеть, Tailscale) — там запрет
+  Осмысленно только для частного адреса (10/8, 172.16/12, 192.168/16;
+  адрес Tailscale 100.x к частным НЕ относится) — там запрет
   ядра не действует. Тогда повтори запуск с CONFIRM_PLAIN_VLESS=yes.
   См. knowledge/networking/_reference/vpn-protocols.md §6.8, ADR-0045.
 ERR
