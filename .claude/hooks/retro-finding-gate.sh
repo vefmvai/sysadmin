@@ -11,10 +11,18 @@
 #   пишем не в retro/BACKLOG.md            → тихо пропускаем
 #   новая активная находка с основанием    → пропускаем
 #   новая активная находка без основания   → deny + образец строки
+#   запись в бэклог, а проверить нечем     → deny (python3 и jq сломаны; не успели за бюджет)
 #
 # Основание — ровно одно слово в строке: «факт» (есть в транскрипте, цитата приведена)
 # либо «гипотеза» (правдоподобно, но не подтверждено — так и записывается).
 # Исторические строки (`done`, `wontfix`) не проверяются: гейт смотрит вперёд, не назад.
+#
+# ВРЕМЯ (ADR-0043, ADR-0044 — дополнение 2026-10-06). Цикла по данным нет, процессов —
+# постоянное число, поэтому время не растёт с объёмом записи. Но запуск python3 считать
+# надо: на Windows это часто заглушка Microsoft Store, под нагрузкой — десятки секунд
+# (03.10.2026 замок красной зоны так шёл 36,5 с при таймауте 15 с). Поэтому: быстрый выход
+# без единого процесса для всех файлов, кроме бэклога, а для бэклога — проверка в фоне под
+# сторожем времени (конец файла), как у замка красной зоны.
 #
 # Ручная проверка: bash .claude/hooks/tests/test-retro-finding-gate.sh
 
@@ -26,7 +34,29 @@ set -uo pipefail
 # как «разрешаю»: замок молча пропускает то, ради чего поставлен (поймано 26.08.2026,
 # 16 случаев теста из 16). Разбор — building-enforcement.md, правило «немой замок».
 export PYTHONIOENCODING=utf-8
-RAW="$(cat)"
+
+# Вход — встроенным read, а не `cat`: до сторожа времени ни одного процесса.
+IFS= read -r -d '' RAW || true
+
+# Быстрый выход: гейт стоит только на бэклоге находок. Имя файла — ASCII, в JSON входа оно
+# не экранируется, поэтому нет подстроки — точно не бэклог. Так любая правка любого другого
+# файла обходится без python3 (раньше каждая платила за три его запуска).
+case "$RAW" in
+  *BACKLOG.md*) ;;
+  *) exit 0 ;;
+esac
+
+# Запись именно в бэклог — по пути из входа, без python (для сторожа времени и для случая,
+# когда JSON разобрать нечем).
+PISHEM_V_BACKLOG=""
+[[ $RAW =~ \"file_path\"[[:space:]]*:[[:space:]]*\"[^\"]*BACKLOG\.md\" ]] && PISHEM_V_BACKLOG=1
+
+# Бюджет, с — меньше таймаута движка из settings.json (15 с). Переменная окружения может
+# его только уменьшить — для теста этой ветки.
+HOOK_BUDGET=10
+if [[ "${RETRO_GATE_BUDGET:-}" =~ ^[0-9]+$ ]] && (( RETRO_GATE_BUDGET < HOOK_BUDGET )); then
+  HOOK_BUDGET="$RETRO_GATE_BUDGET"
+fi
 
 json_get() {
   local path="$1"
@@ -48,7 +78,38 @@ print(cur if isinstance(cur, str) else json.dumps(cur, ensure_ascii=False))
   return 1
 }
 
+deny() { # $1 = причина
+  local out=""
+  if command -v python3 >/dev/null 2>&1; then
+    out="$(python3 -c '
+import sys, json
+print(json.dumps({"hookSpecificOutput": {
+  "hookEventName": "PreToolUse",
+  "permissionDecision": "deny",
+  "permissionDecisionReason": sys.argv[1]}}, ensure_ascii=False))
+' "$1" 2>/dev/null)"
+  fi
+  if [[ "$out" == *'"permissionDecision": "deny"'* ]]; then
+    printf '%s\n' "$out"
+    exit 0
+  fi
+  # python3 нет или он сломан (заглушка Microsoft Store без Python падает сразу): отказ
+  # встроенным printf, без цитаты строк — экранировать их для JSON без python надёжно нечем,
+  # а немой гейт движок читает как «разрешаю» (06.10.2026, правило 3д свода замков).
+  printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"🚧 ГЕЙТ /retro заблокировал запись в бэклог (ADR-0021). Подробный вердикт напечатать нечем: python3 недоступен или сломан (на Windows — заглушка Microsoft Store без Python?).\nПроверь сам: у каждой активной находки (open) основание объявлено ОДНИМ словом в строке — «факт» или «гипотеза». Почини python3 и повтори запись."}}'
+  exit 0
+}
+
+# ── ПРОВЕРКА: исполняется в фоне под сторожем времени (конец файла) ────────────
+proverit() {
 FILE="$(json_get tool_input.file_path || true)"
+if [ -z "${FILE:-}" ]; then
+  # Вход не разобран (python3 и jq недоступны или сломаны). Пишем не в бэклог — не наше
+  # дело; в бэклог — проверить основание нечем: отказ, а не молчаливый пропуск.
+  [ -n "$PISHEM_V_BACKLOG" ] || exit 0
+  deny "🚧 ГЕЙТ /retro не смог разобрать запись в бэклог: python3 и jq недоступны или сломаны, поэтому основание находок проверить нечем — блокирую (ADR-0021).
+Почини python3 (или поставь jq) и повтори запись."
+fi
 # Гейт срабатывает на ЛЮБОМ бэклоге находок, а не только на пути локального скилла
 # `/retro`. Причина (разбор 2026-07-24, F5): саморазбор переехал в глобальный навык
 # `/lore-retro`, который пишет в `_retro/`, и правило снова стало просто прозой на новом
@@ -101,15 +162,34 @@ NEVER повышать внутрисессионную гипотезу аге�
 («оказалось X»), и NEVER приписывать последствие, следа которого в транскрипте нет —
 такую находку убираем или переписываем в то, что действительно было."
 
-if command -v python3 >/dev/null 2>&1; then
-  python3 -c '
-import sys, json
-print(json.dumps({"hookSpecificOutput": {
-  "hookEventName": "PreToolUse",
-  "permissionDecision": "deny",
-  "permissionDecisionReason": sys.argv[1]}}, ensure_ascii=False))
-' "$REASON"
-else
-  esc="$(printf '%s' "$REASON" | sed 's/\\/\\\\/g; s/"/\\"/g' | awk 'BEGIN{ORS="\\n"}1')"
-  printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"%s"}}\n' "$esc"
-fi
+deny "$REASON"
+}
+# ── КОНЕЦ ПРОВЕРКИ ────────────────────────────────────────────────────────────
+
+# ── Сторож времени: бюджет покрывает весь хук (ADR-0044, дополнение 2026-10-06) ─
+# Как у замка красной зоны: проверка в фоне, здесь только встроенный `read -t`; не дождались
+# — вердикт встроенным `printf`. Запись в бэклог без проверки основания — ровно то, ради чего
+# гейт стоит, поэтому «не успел» для бэклога — отказ; для прочего (вход упомянул бэклог, но
+# пишем не в него) — пропуск. Фоновая часть не держит трубы движка: stderr заменён насовсем.
+# Завершение — по метке конца после вложенной `( proverit )` (её `exit` метку не отменяют),
+# номер фоновой части — `${!:-}`: так работает и системный bash macOS (3.2), где `$!` после
+# `<( )` не задан, а код `read -t` по таймауту не отличается от конца данных.
+ne_uspel() {
+  [ -n "$PISHEM_V_BACKLOG" ] || exit 0
+  printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"🚧 ГЕЙТ /retro НЕ УСПЕЛ проверить запись в бэклог за '"$HOOK_BUDGET"' с — блокирую (fail-closed).\n\nПрерванный по таймауту хук движок читает как «разрешаю», а запись находки без проверки основания — ровно то, ради чего гейт стоит. Запись не признана плохой — проверка не завершилась (занятая машина?).\nАгент: повтори запись."}}'
+  exit 0
+}
+KONETS_PROVERKI='__KONETS_PROVERKI_GEJTA__'
+OSTALOS=$(( HOOK_BUDGET - SECONDS ))
+(( OSTALOS > 0 )) || ne_uspel
+exec 3< <(exec 2>/dev/null; ( proverit ); printf '%s' "$KONETS_PROVERKI")
+PROVERKA_PID="${!:-}"
+VERDIKT=""
+IFS= read -r -d '' -t "$OSTALOS" VERDIKT <&3
+case "$VERDIKT" in
+  *"$KONETS_PROVERKI") VERDIKT="${VERDIKT%"$KONETS_PROVERKI"}" ;;
+  *) [ -n "$PROVERKA_PID" ] && kill "$PROVERKA_PID" 2>/dev/null
+     ne_uspel ;;
+esac
+[ -n "$VERDIKT" ] && printf '%s' "$VERDIKT"
+exit 0
