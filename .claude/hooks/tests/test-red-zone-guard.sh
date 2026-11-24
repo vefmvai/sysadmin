@@ -8,7 +8,9 @@ set -uo pipefail
 # (Windows cp1252) она падает и подаёт хуку пустой вход — тест «проваливается» там,
 # где замок исправен. Правило 3д свода замков.
 export PYTHONIOENCODING=utf-8
-HOOK="$(cd "$(dirname "$0")/.." && pwd)/red-zone-guard.sh"
+# RED_GUARD_HOOK — другая версия замка (например, историческая из git): так тест
+# проверяется на дефекте, который должен ловить (персона §3.11).
+HOOK="${RED_GUARD_HOOK:-$(cd "$(dirname "$0")/.." && pwd)/red-zone-guard.sh}"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 PASS=0; FAIL=0
@@ -54,7 +56,7 @@ STALE="$TMP/stale.jsonl"
 RED_SAMPLE='docker volume rm pgdata-old'
 
 run() { # $1 = команда, $2 = transcript_path (может быть пустым)
-  python3 - "$1" "${2:-}" <<'PY' | env PYTHONIOENCODING="${HOOK_ENC:-utf-8}" bash "$HOOK"
+  python3 - "$1" "${2:-}" <<'PY' | env PYTHONIOENCODING="${HOOK_ENC:-utf-8}" RED_GUARD_BUDGET="${HOOK_BUDGET_ENV:-}" PATH="${HOOK_PATH:-$PATH}" bash "$HOOK"
 import json, sys
 print(json.dumps({
   "session_id": "test-session",
@@ -149,6 +151,115 @@ check deny  "windows-temp с обратными слешами наружу" \
 check allow 'штатная уборка через $TMPDIR'      'rm -rf "$TMPDIR/scratch"'
 check allow "штатная уборка windows-temp"       'rm -rf /c/users/op/appdata/local/temp/claude/p/s/scratchpad/x'
 
+echo "[1д] Ключи любой записью и знак конца ключей -- (разбор 19.10.2026)"
+# `rm -rf -- "$dir"` — штатная защитная запись (её же даёт образец ADR-0038), а шаблон
+# исключения ждал после ключей сразу путь: уборка своего временного с `--` уходила в
+# красную зону. Раздельные и длинные ключи — тот же случай.
+check allow "-- перед /tmp"                      'rm -rf -- /tmp/claude-scratch/x'
+check allow '-- перед $TMPDIR'                   'rm -rf -- "$TMPDIR/scratch"'
+check allow "-- и windows-temp с прямыми слешами" \
+  'rm -rf -- "C:/Users/operator/AppData/Local/Temp/claude/p/s/scratchpad/x"'
+check allow "проверка «это папка» и снос с --"   '[ -d "/tmp/x" ] && rm -rf -- "/tmp/x"'
+check allow "раздельные ключи во временном"      'rm -r -f /tmp/build'
+check allow "длинные ключи во временном"         'rm --recursive --force "$TMPDIR/build"'
+check allow "два временных пути"                 'rm -rf /tmp/a "$TMPDIR/b"'
+check allow "перенаправление ошибок — не путь"   'rm -rf /tmp/x 2>/dev/null'
+# Контроль: новая запись не открывает дорогу боевым путям.
+check deny  "-- не открывает боевой путь"        'rm -rf -- /opt/prod'
+check deny  "-- и выход вверх из временного"     'rm -rf -- /tmp/../opt/prod'
+check deny  "длинный ключ — не конец ключей"     'rm -rf --no-preserve-root /'
+
+echo "[1е] Исключение — только если ВСЕ пути временные (разбор 19.10.2026)"
+# Прежнее исключение смотрело на первый путь: команда, начатая со временного каталога,
+# уносила вторым путём домашний каталог или «Документы» — их нет в списке боевых.
+check deny  "временный + ~/Documents"            'rm -rf /tmp/x ~/Documents'
+check deny  'временный + $HOME'                  'rm -rf /tmp/x $HOME'
+check deny  '$TMPDIR + "$HOME"'                  'rm -rf "$TMPDIR/x" "$HOME"'
+check deny  "временный + документы windows"      'rm -rf /tmp/x "C:/Users/operator/Documents"'
+check deny  "windows-temp + msys-документы" \
+  'rm -rf /c/users/operator/appdata/local/temp/x /c/users/operator/documents'
+check deny  "-- + временный + домашний"          'rm -rf -- /tmp/x ~/Documents'
+check deny  "ключ после пути не прячет второй"   'rm -rf /tmp/x -- ~/Documents'
+check deny  "без пути: пути придут из stdin"     'xargs -0 rm -rf'
+check deny  "обёртка ssh: второй путь в кавычках" 'ssh host "rm -rf /tmp/x ~/data"'
+check allow "обёртка ssh: только временный путь"  'ssh host "rm -rf /tmp/x"'
+
+echo "[1з] Переменная временного каталога — только в надёжной форме (разбор 19.10.2026)"
+# Шаблон принимал любое `${TMPDIR…}`, в том числе с подстановкой чужого пути, и верил имени
+# переменной, даже если та же команда её переназначила.
+check deny  'подстановка по умолчанию — домашний'  'rm -rf "${TMPDIR:-$HOME}"'
+check deny  'подстановка «если задана» — домашний' 'rm -rf "${TEMP:+$HOME}"'
+check deny  'команда сама задаёт TMP'              'TMP=~; rm -rf "$TMP"'
+check deny  'export TMPDIR перед сносом'           'export TMPDIR=$HOME; rm -rf "$TMPDIR/x"'
+check deny  'read TMP перед сносом'                'read -r TMP < path.txt; rm -rf "$TMP"'
+check allow '${TMPDIR:?} — обрыв, если не задана'  'rm -rf "${TMPDIR:?}/x"'
+check allow '${TMPDIR} в скобках'                  'rm -rf "${TMPDIR}/x"'
+check allow 'mktemp рядом не лишает доверия'       'rm -rf "$TMPDIR/x"; d=$(mktemp -d)'
+
+echo "[1ж] Подстановка команды внутри «безопасного» сегмента (разбор 19.10.2026)"
+# Сегменты, начатые с read-only утилиты или git-текста, пропускались целиком — вместе с
+# `$(…)` и обратными кавычками, внутри которых исполняется что угодно.
+check deny  'echo $(…) с удалением внутри'       'echo $(rm -rf /opt/prod)'
+check deny  'cat + $(…) с удалением'             'cat notes.txt $(rm -rf /opt/prod)'
+check deny  'git commit -m "$(…)" с удалением'   'git commit -m "$(rm -rf /opt/prod)"'
+check deny  'обратные кавычки с удалением'       'echo `rm -rf /opt/prod`'
+check deny  'git rm без силы, но с подстановкой' 'git rm -r old $(rm -r /opt/prod)'
+# Контроль: безобидная подстановка и упоминание в тексте по-прежнему проходят.
+check allow 'echo "$(date)"'                     'echo "$(date)"'
+check allow 'grep с текстом rm -rf'              'grep -rn "rm -rf" scripts/'
+check allow 'коммит с упоминанием в тексте'      'git commit -m "docs: убран rm -rf из примера"'
+
+echo "[1и] Обходы, найденные красной командой (19.10.2026)"
+# Каждый запрещающий случай ниже на предыдущей версии замка проходил без фразы оператора
+# (вердикт снят прогоном); разрешающие «git grep с текстом» и «ветка на -f» там были
+# ложными блоками, остальные разрешающие — контрольные.
+check deny  'одиночный & прячет удаление за echo'   'echo start & rm -rf /opt/prod'
+check deny  'одиночный & и снос тома'               'echo ok & docker volume rm pgdata'
+check deny  'подстановка процесса <(…)'             'cat <(rm -rf /opt/prod)'
+check deny  'подстановка процесса >(…)'             'echo x > >(rm -rf /opt/prod)'
+check deny  'кавычки внутри имени: r"m"'            'r"m" -rf /opt/prod'
+check deny  'кавычки после имени: rm""'             'rm"" -rf /opt/prod'
+check deny  'обратная косая внутри имени: r\m'      'r\m -rf /opt/prod'
+check deny  'перенос строки перед ключами'          $'rm \\\n-rf /opt/prod'
+check deny  'перенос строки CRLF перед ключами'     $'rm \\\r\n-rf /opt/prod'
+check deny  'имя команды в переменной'              'X=rm; $X -rf /opt/prod'
+check deny  'имя команды в переменной через eval'   'C=rm; eval "$C -rf /opt/prod"'
+check deny  'find -exec rm без -r'                  'find /opt/prod -type f -exec rm {} +'
+check deny  'find -delete'                          'find /opt/prod -delete'
+check deny  'xargs rm'                              'find /opt -name x -print0 | xargs -0 rm'
+check deny  'перенаправление в чужой файл, слитно'  'rm -rf /tmp/x >~/.bashrc'
+check deny  'перенаправление в чужой файл, через пробел' 'rm -rf /tmp/x > ~/.bashrc'
+check deny  'подстановка внутри ${TMPDIR:?…}'       'rm -rf "${TMPDIR:?$(rm -rf ~/Documents)}"'
+check deny  'force через «+» перед веткой'          'git push origin +main'
+check deny  'force склейкой ключей'                  'git push -uf origin main'
+# Контроль: безобидное по-прежнему проходит.
+check allow 'git grep с текстом rm -rf'             'git grep -n "rm -rf" HEAD'
+check allow 'ветка на -f — не ключ силы'            'git push origin release-f'
+check allow 'обычный push с -u'                     'git push -u origin feature'
+check allow 'уборка временного с 2>&1'              'rm -rf /tmp/x 2>&1'
+check allow 'уборка временного с 2> /dev/null'      'rm -rf /tmp/x 2> /dev/null'
+check allow 'уборка временного с журналом во временном' 'rm -rf /tmp/x >/tmp/x.log'
+check allow 'адрес с & в кавычках'                  'curl -s "https://example.com/?a=1&b=2"'
+check allow 'фоновая команда'                       'sleep 1 & wait'
+check allow 'diff двух подстановок без удаления'    'diff <(sort a.txt) <(sort b.txt)'
+
+echo "[2а] Рекурсивное удаление в любой записи ключей (разбор 19.10.2026)"
+# Шаблон ловил только склеенные -rf/-fr: раздельные, длинные ключи и -r без -f проходили.
+check deny  "раздельные ключи -r -f"             'rm -r -f /opt/prod'
+check deny  "заглавная -R -f"                    'rm -R -f /opt/prod'
+check deny  "длинные --recursive --force"        'rm --recursive --force /opt/prod'
+check deny  "-r без -f — тоже необратимо"        'rm -r /opt/prod'
+check deny  "-f раньше -r"                       'rm -f -r /opt/prod'
+check deny  "внутри ssh"                         'ssh host "rm -r /opt/apps/site"'
+check deny  "через find -exec"                   'find /opt -name x -exec rm -r {} +'
+check deny  "git rm с ключом силы раздельно"     'git rm -r -f old-dir'
+check deny  "git rm -rf — как раньше"            'git rm -rf old-dir'
+# Контроль: не-рекурсивное и обратимое не задето.
+check allow "rm файла без -r"                    'rm -f /tmp/report.json'
+check allow "слово с rm внутри — не команда"     'confirm -r /opt/prod'
+check allow "git rm -r --cached — только индекс" 'git rm -r --cached old-dir'
+check allow "git rm -r без силы — вернёт checkout" 'git rm -r old-dir'
+
 echo "[2] Красная зона без подтверждения блокируется"
 check deny "rm -rf на боевом пути"          'rm -rf /opt/academii/data'
 check deny "rm -fr (переставленные флаги)"  'rm -fr /var/lib/postgresql'
@@ -224,6 +335,178 @@ else
   FAIL=$((FAIL+1)); echo "  ❌ отказ при cp1252 пуст или искажён"
 fi
 unset HOOK_ENC
+
+echo "[8] Замок укладывается в своё время сам (разбор 26.09.2026)"
+# Дефект: разбор сегментов порождал ~15 процессов на сегмент, в Git Bash на Windows замок
+# тратил 17–60 с на обычную команду при таймауте движка 15 с. Прерванный хук движок читает
+# как «разрешаю» — за 18–26.09 на одной машине 99 команд прошли без вердикта, одна из них
+# с `rm -rf` по пути в переменной. На быстрой машине старый код укладывался бы в срок,
+# поэтому главный ассерт — по ТЕКСТУ цикла (правило 3г свода замков), а не по секундомеру.
+ok()  { PASS=$((PASS+1)); printf '  ✅ %s\n' "$1"; }
+bad() { FAIL=$((FAIL+1)); printf '  ❌ %s\n' "$1"; }
+# Часы теста — без порождения процессов и без GNU date: `date +%s%N` на macOS печатает
+# букву N вместо наносекунд, и арифметика замера падает. bash 5+ — $EPOCHREALTIME
+# (микросекунды; разделитель дробной части зависит от локали), иначе — целые $SECONDS.
+now_ms() {
+  if [ -n "${EPOCHREALTIME:-}" ]; then
+    local t="${EPOCHREALTIME/[.,]/}"
+    NOW_MS=$(( 10#$t / 1000 ))
+  else
+    NOW_MS=$(( SECONDS * 1000 ))
+  fi
+}
+
+LOOP="$(sed -n '/^# ── НАЧАЛО РАЗБОРА СЕГМЕНТОВ/,/^# ── КОНЕЦ РАЗБОРА СЕГМЕНТОВ/p' "$HOOK" \
+        | grep -v '^[[:space:]]*#' | sed 's/[[:space:]]#.*$//')"
+if [ -z "$LOOP" ] || ! grep -q 'RED_PATTERNS' <<<"$LOOP"; then
+  bad "цикл разбора сегментов не найден по маркерам — проверять нечего (контроль непустоты)"
+elif grep -Eq '\$\(|`|(^|[^|])\|[^|]|(^|[^a-z_])(grep|egrep|sed|awk|tr|cut|python3?|perl)([[:space:]]|$)' <<<"$LOOP"; then
+  bad "в цикле по сегментам порождаются процессы — на Windows это десятки секунд:
+$(grep -En '\$\(|`|(^|[^|])\|[^|]|(^|[^a-z_])(grep|egrep|sed|awk|tr|cut|python3?|perl)([[:space:]]|$)' <<<"$LOOP" | head -3)"
+else
+  ok "в цикле по сегментам ни одного порождённого процесса"
+fi
+
+# Контракт с настройками: таймаут движка обязан быть больше собственного бюджета хука,
+# иначе хук не успеет отказать сам и движок его оборвёт — то есть пропустит команду.
+BUDGET="$(grep -Eo '^HOOK_BUDGET=[0-9]+' "$HOOK" | cut -d= -f2)"
+SETTINGS="$(cd "$(dirname "$0")/../.." && pwd)/settings.json"
+ENGINE_TO="$(python3 - "$SETTINGS" <<'PY' 2>/dev/null
+import json, sys
+d = json.load(open(sys.argv[1], encoding="utf-8"))
+for m in d.get("hooks", {}).get("PreToolUse", []):
+    for h in m.get("hooks", []):
+        if "red-zone-guard.sh" in h.get("command", ""):
+            print(h.get("timeout", 60))
+PY
+)"
+if [ -z "$BUDGET" ] || [ -z "$ENGINE_TO" ]; then
+  bad "не прочитал бюджет хука (${BUDGET:-нет}) или таймаут движка (${ENGINE_TO:-нет})"
+elif [ "$ENGINE_TO" -gt "$BUDGET" ]; then
+  ok "таймаут движка ${ENGINE_TO} с больше бюджета хука ${BUDGET} с"
+else
+  bad "таймаут движка ${ENGINE_TO} с не больше бюджета хука ${BUDGET} с — движок оборвёт хук раньше отказа"
+fi
+
+# Каждое правило обязано компилироваться встроенным разбором bash: несобранный шаблон
+# даёт код 2, `if [[ … ]]` читает его как «не совпало» — правило молчит, замок цел на вид.
+PATTERNS_SRC="$(sed -n '/^RED_PATTERNS=(/,/^)/p' "$HOOK")"
+eval "$PATTERNS_SRC"
+broken=""
+for re in "${RED_PATTERNS[@]}" \
+          "$(grep -Eo "^SAFE_RM_RE='[^']+'" "$HOOK" | sed "s/^SAFE_RM_RE='//; s/'\$//")"; do
+  [[ "probe" =~ $re ]]; [ $? -eq 2 ] && broken="${broken} ${re}"
+done
+# Шаблоны разбора исключения по словам (19.10.2026) — та же проверка сборки.
+for name in TOKEN_RE REDIR_RE SAFE_REDIR_RE TEMP_PATH_RE TMPVAR_WORD_RE GIT_RM_LEAD FORCE_OPT_RE SUBST_RE RM_VAR_RE; do
+  re="$(grep -Eo "^${name}='[^']+'" "$HOOK" | sed "s/^${name}='//; s/'\$//")"
+  [ -z "$re" ] && continue
+  [[ "probe" =~ $re ]]; [ $? -eq 2 ] && broken="${broken} ${name}"
+done
+if [ "${#RED_PATTERNS[@]}" -lt 5 ]; then bad "правил прочитано подозрительно мало: ${#RED_PATTERNS[@]}"
+elif [ -n "$broken" ]; then bad "не компилируются в bash =~:${broken}"
+else ok "все ${#RED_PATTERNS[@]} правил и исключение компилируются в bash =~"; fi
+
+# Своя ветка отказа по времени: бюджет 0 — отказ даже на безобидной команде.
+HOOK_BUDGET_ENV=0
+OUT="$(run 'ls -la' 2>/dev/null)"
+if printf '%s' "$OUT" | grep -q '"deny"' && printf '%s' "$OUT" | grep -q 'НЕ УСПЕЛ'; then
+  ok "бюджет исчерпан — отказ, а не молчаливый пропуск"
+else
+  bad "при исчерпанном бюджете замок не отказал: ${OUT:0:120}"
+fi
+unset HOOK_BUDGET_ENV
+
+# Длинные команды — форма, на которой замок и прерывался. Числа сегментов хватает, чтобы
+# старый код на Windows работал минутами; новый обязан уложиться в свой бюджет.
+LONG_OK="$(for i in $(seq 1 400); do printf 'ls /tmp/d%d | wc -l; ' "$i"; done)"
+LONG_RED="${LONG_OK} docker volume rm pgdata"
+# Форма команды, прошедшей без вердикта 26.09 (обобщена, без данных оператора): тело
+# heredoc, а за ним ssh с уборкой каталога по пути в переменной — проверить путь нельзя.
+SHAPE="$(cat <<'CMD'
+mkdir -p /tmp/t && cp a /tmp/t/a && cp b /tmp/t/b
+cat > /tmp/t/h.sh <<'EOF'
+cut_fn() { sed -n "/^$2() {/,/^}/p" "$1"; }
+eval "$(cut_fn "$D/new" f)"; echo " new:"; f
+T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
+EOF
+tar -czf - -C /tmp/t . | ssh host 'T=$(mktemp -d); trap "rm -rf $T" EXIT; tar -xzf - -C $T; sudo bash $T/h.sh' 2>&1 | grep -v x
+CMD
+)"
+for spec in "allow|400 сегментов без опасного|LONG_OK" "deny|400 сегментов, опасное в конце|LONG_RED" "deny|форма 26.09: ssh + rm -rf по переменной|SHAPE"; do
+  want="${spec%%|*}"; rest="${spec#*|}"; desc="${rest%%|*}"; var="${rest#*|}"
+  now_ms; s=$NOW_MS; OUT="$(run "${!var}" 2>/dev/null)"; now_ms; ms=$(( NOW_MS - s ))
+  got="allow"; printf '%s' "$OUT" | grep -q '"permissionDecision": *"deny"' && got="deny"
+  if printf '%s' "$OUT" | grep -q 'НЕ УСПЕЛ'; then
+    bad "${desc} — не уложился в бюджет (${ms} мс)"
+  elif [ "$got" != "$want" ]; then
+    bad "${desc} — ожидали ${want}, получили ${got} (${ms} мс)"
+  elif [ "$ms" -ge $(( ${BUDGET:-10} * 1000 )) ]; then
+    bad "${desc} — ${ms} мс, дольше бюджета ${BUDGET:-10} с"
+  else
+    ok "${desc} — ${got}, ${ms} мс"
+  fi
+done
+
+echo "[9] Бюджет покрывает весь замок, а не только цикл (разбор 06.10.2026)"
+# Дефект: бюджет проверялся только внутри цикла по сегментам, а до цикла замок порождал
+# процессы — `cat`, `python3` на разбор JSON, `tr`, `sed`. 03.10 на занятой машине оператора
+# замок шёл 36,5 с при таймауте движка 15 с, и движок выполнил команду без вердикта; та же
+# команда в спокойную минуту — 0,6 с. Медленный запуск подстраиваем подставным `python3`,
+# который висит 6 с, — только в PATH замка (правило 3д: условие навязывается подопечному),
+# бюджет — 2 с. Исправный замок отказывает сам примерно через 2 с; старый ждёт подставного
+# и пропускает. Секундомер здесь честный: задержка задана тестом, а не скоростью машины.
+# Время меряется по захвату stdout И stderr — с ожиданием, пока замок закроет обе трубы,
+# как ждёт движок: фоновая проверка, держащая любую из них, сорвала бы срок и здесь
+# (так и было на первой версии починки: `proverit 2>/dev/null` держал stderr — 6,5 с).
+MEDL="$TMP/medlennyj"; mkdir -p "$MEDL"
+printf '#!/usr/bin/env bash\nsleep 6\nexit 1\n' > "$MEDL/python3"; chmod +x "$MEDL/python3"
+for spec in "безобидная команда|ls -la" "команда красной зоны|${RED_SAMPLE}"; do
+  desc="${spec%%|*}"; cmd="${spec#*|}"
+  now_ms; s=$NOW_MS
+  OUT="$(HOOK_PATH="$MEDL:$PATH" HOOK_BUDGET_ENV=2 run "$cmd" 2>&1)"
+  now_ms; ms=$(( NOW_MS - s ))
+  if printf '%s' "$OUT" | grep -q '"permissionDecision": *"deny"' \
+     && printf '%s' "$OUT" | grep -q 'НЕ УСПЕЛ' && [ "$ms" -lt 4000 ]; then
+    ok "медленный python3, ${desc} — отказ сам за ${ms} мс"
+  else
+    bad "медленный python3, ${desc} — ${ms} мс, вывод: ${OUT:0:100}"
+  fi
+done
+# Переносимость сторожа (правило 3г: поведение зависит от версии bash — ловится текстом). На
+# системном bash macOS (3.2) `$!` после `<( )` не задан, и под `set -u` голое `$!` обрывает
+# замок без вывода — то есть «разрешаю»; код `read -t` по таймауту (>128) bash отличает от
+# конца данных только с 4.0. Первая версия сторожа, до отправки в эту заявку, на оба наступила.
+STRAZH="$(sed -n '/^# ── Сторож времени/,$p' "$HOOK" | grep -v '^[[:space:]]*#')"
+if [ -z "$STRAZH" ]; then
+  bad "сторож времени не найден по маркеру — проверять нечего"
+else
+  if grep -Eq '=\$!([^:]|$)' <<<"$STRAZH"; then bad "номер фоновой проверки берётся голым \$! — на bash < 4.4 под set -u замок падает молча"
+  else ok "номер фоновой проверки — \${!:-}: на bash < 4.4 не падает"; fi
+  if grep -Eq '\$\?[[:space:]]*>[[:space:]]*128' <<<"$STRAZH"; then bad "таймаут узнаётся по коду read (>128) — на bash < 4.0 его нет"
+  elif grep -q 'KONETS_PROVERKI' <<<"$STRAZH"; then ok "завершение проверки — по метке конца, а не по коду read"
+  else bad "не нашёл, как сторож отличает завершение проверки от таймаута"; fi
+fi
+
+echo "[10] Сломанный python3 не делает замок немым (разбор 06.10.2026)"
+# Дефект: отказ печатался через python3, и если тот есть, но сразу падает (на Windows —
+# заглушка Microsoft Store без установленного Python), замок молчал с кодом 0 — движок
+# пропускал даже `docker volume rm`. Подставные python3 и jq падают мгновенно; опасное
+# обязано получить отказ, безобидное — пройти (разбор по сырому тексту входа остаётся).
+SLOM="$TMP/slomannyj"; mkdir -p "$SLOM"
+printf '#!/usr/bin/env bash\necho "Python was not found; run without arguments to install from the Microsoft Store" >&2\nexit 9009\n' > "$SLOM/python3"
+printf '#!/usr/bin/env bash\nexit 127\n' > "$SLOM/jq"
+chmod +x "$SLOM/python3" "$SLOM/jq"
+for spec in "deny|команда красной зоны|${RED_SAMPLE}" "allow|безобидная команда|ls -la"; do
+  want="${spec%%|*}"; rest="${spec#*|}"; desc="${rest%%|*}"; cmd="${rest#*|}"
+  OUT="$(HOOK_PATH="$SLOM:$PATH" run "$cmd" "$CONFIRMED" 2>/dev/null)"
+  got="allow"; printf '%s' "$OUT" | grep -q '"permissionDecision": *"deny"' && got="deny"
+  if [ "$got" = "$want" ]; then
+    ok "сломанный python3, ${desc} — ${got}"
+  else
+    bad "сломанный python3, ${desc} — ожидали ${want}, получили ${got}${OUT:+, вывод: ${OUT:0:100}}"
+  fi
+done
 
 echo "─────────────────────────────────────────────────────────"
 printf 'Итог: %d прошло, %d провалено\n' "$PASS" "$FAIL"
