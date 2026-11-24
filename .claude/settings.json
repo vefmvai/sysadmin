@@ -1,6 +1,19 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "g=\"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/brain-update-check.sh\"; if [ -f \"$g\" ]; then bash \"$g\"; else cat >/dev/null; fi",
+            "timeout": 20,
+            "statusMessage": "Проверяю, не вышла ли новая версия мозга…"
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "matcher": "Bash",
