@@ -8,7 +8,7 @@
 
 ```
 [Клиент: iPhone/Mac/Laptop] (в РФ)
-     ↓ vless-tcp
+     ↓ vless + tls
 [Панель 3X-UI на VPS оператора в РФ]
      ↓ vless+reality (outbound от провайдера)
 [Сервер платного VPN-провайдера] (за границей)
@@ -51,7 +51,7 @@
 
 ```
 [Клиент: iPhone/Mac/Laptop] (в РФ)
-     ↓ vless-tcp
+     ↓ vless + tls
 [Панель 3X-UI на VPS оператора в РФ]                ← основной VPS
      ↓ vless+reality
 [Панель 3X-UI на загр.VPS оператора]                ← второй VPS
@@ -117,7 +117,8 @@
 
 Reality — это маскировка от DPI на пути из РФ за границу. Между клиентом
 в РФ и сервером в РФ DPI не работает, маскировка не нужна. Используется
-**VLESS-TCP без Reality**.
+**VLESS + TLS без Reality**: TLS здесь не маскировка, а шифрование, и без него
+клиенты на Xray-core 26.7.11+ не подключатся (ADR-0045).
 
 Если же сервер за границей (`LOCATION=foreign-server`) — VLESS+Reality
 на 443.

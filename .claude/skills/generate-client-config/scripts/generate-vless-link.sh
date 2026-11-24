@@ -3,8 +3,10 @@
 #
 # Скилл получает inbound_id + client_uuid + параметры с панели, формирует URI.
 # Поддерживает:
-#  - vless-tcp без шифрования (для ru-server inbound).
+#  - vless + TLS (штатный ru-server inbound, ADR-0045): sni, fp, alpn.
 #  - vless-reality с serverName, fingerprint, publicKey, shortId, spiderX, flow.
+#  - vless без TLS (security=none) — с предупреждением: клиенты на Xray-core
+#    26.7.11+ такую ссылку к публичному адресу не собирают.
 #
 # Вход через ENV:
 #   PANEL_DOMAIN, PANEL_PORT, WEB_BASE_PATH, ADMIN_LOGIN, PASSWORD_REF
@@ -113,10 +115,16 @@ if [ "$SECURITY" = "reality" ]; then
 elif [ "$SECURITY" = "tls" ]; then
     TLS_SETTINGS="$(echo "$STREAM_SETTINGS" | jq '.tlsSettings')"
     SNI="$(echo "$TLS_SETTINGS" | jq -r '.serverName // ""')"
-    FP="$(echo "$TLS_SETTINGS" | jq -r '.fingerprint // "chrome"')"
+    # 3X-UI хранит отпечаток для ссылок в tlsSettings.settings.fingerprint
+    # (frontend/src/models/inbound.js, genVLESSLink; сверено по v3.0.2).
+    FP="$(echo "$TLS_SETTINGS" | jq -r '.settings.fingerprint // .fingerprint // "chrome"')"
+    ALPN="$(echo "$TLS_SETTINGS" | jq -r '(.alpn // []) | join(",")')"
 
     QUERY_PARTS+=("sni=$(urlencode "$SNI")")
     QUERY_PARTS+=("fp=${FP}")
+    [ -n "$ALPN" ] && QUERY_PARTS+=("alpn=$(urlencode "$ALPN")")
+elif [ "$SECURITY" = "none" ]; then
+    echo "[link] ⚠️  inbound без TLS (security=none): клиенты на Xray-core 26.7.11+ такую ссылку к публичному адресу не соберут («vless without TLS … is prohibited»). Годится только для частного адреса; штатно — вход vless-tls (ADR-0045)." >&2
 fi
 
 # Дополнительные поля для разных transport

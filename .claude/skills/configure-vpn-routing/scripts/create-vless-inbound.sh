@@ -1,21 +1,33 @@
 #!/bin/bash
 # create-vless-inbound.sh — создать VLESS inbound в панели через REST API.
 #
-# Поддерживает два протокола:
-#  - vless-tcp (без Reality, для ru-server inbound).
+# Поддерживает три протокола:
+#  - vless-tls     (VLESS + TLS, штатный для ru-server inbound — ADR-0045).
 #  - vless-reality (для foreign-server inbound с маскировкой от DPI).
+#  - vless-tcp     (VLESS БЕЗ TLS — только к частному адресу, по CONFIRM_PLAIN_VLESS=yes).
 #
 # Вход через ENV:
 #   PANEL_DOMAIN, PANEL_PORT, WEB_BASE_PATH — параметры панели
 #   ADMIN_LOGIN, PASSWORD_REF              — для login
-#   INBOUND_REMARK         — человеко-читаемая метка (например, "vless-tcp-main")
+#   INBOUND_REMARK         — человеко-читаемая метка (например, "vless-tls-main")
 #   INBOUND_LISTEN_PORT    — порт inbound на сервере (обычно 443)
-#   INBOUND_PROTOCOL       — vless-tcp | vless-reality
+#   INBOUND_PROTOCOL       — vless-tls | vless-reality | vless-tcp (default: vless-tls)
 #   INBOUND_FLOW           — пусто или xtls-rprx-vision
 #   SERVER_ROLE            — ru-server | foreign-server | "" (для guard'а протокола)
 #   CONFIRM_REALITY_ON_RU  — yes, чтобы осознанно создать Reality на ru-server
+#   CONFIRM_PLAIN_VLESS    — yes, чтобы осознанно создать vless-tcp без TLS
+#   TLS_SERVER_NAME        — для vless-tls: домен, на который подключаются клиенты
+#                            (default: PANEL_DOMAIN)
+#   TLS_CERT_FILE, TLS_KEY_FILE — для vless-tls: пути к сертификату и ключу на сервере
+#                            (default: из настроек панели webCertFile/webKeyFile —
+#                            их выставляет /setup-vpn-panel)
 #   SSH_TARGET             — для генерации Reality keypair при vless-reality
 #   REALITY_DEST           — для vless-reality (например, www.cloudflare.com)
+#
+# ВАЖНО (guard 2): vless-tcp без TLS к публичному адресу клиенты на Xray-core
+#   26.7.11+ не собирают («vless without TLS or other encryption is prohibited…»),
+#   а UUID клиента идёт по сети открытым текстом. Создаётся только по
+#   CONFIRM_PLAIN_VLESS=yes — для частной сети (LAN, Tailscale). ADR-0045.
 #
 # ВАЖНО (guard): vless-reality на ru-server обычно избыточен. Маршрут «клиент в
 #   РФ → сервер в РФ» не пересекает TSPU, маскировка чаще всего ни от чего не
@@ -42,10 +54,32 @@ ADMIN_LOGIN="${ADMIN_LOGIN:?ADMIN_LOGIN обязателен}"
 PASSWORD_REF="${PASSWORD_REF:?PASSWORD_REF обязателен (например, keychain:3xui-panel-XXX)}"
 INBOUND_REMARK="${INBOUND_REMARK:-vless-main}"
 INBOUND_LISTEN_PORT="${INBOUND_LISTEN_PORT:-443}"
-INBOUND_PROTOCOL="${INBOUND_PROTOCOL:-vless-tcp}"
+INBOUND_PROTOCOL="${INBOUND_PROTOCOL:-vless-tls}"
 INBOUND_FLOW="${INBOUND_FLOW:-}"
 SERVER_ROLE="${SERVER_ROLE:-}"
 CONFIRM_REALITY_ON_RU="${CONFIRM_REALITY_ON_RU:-}"
+CONFIRM_PLAIN_VLESS="${CONFIRM_PLAIN_VLESS:-}"
+
+# --- Guard 2: VLESS без TLS не создаётся без подтверждения (ADR-0045) ------
+# Запрет ядра действует на КЛИЕНТЕ и не виден на сервере: серверное ядро обычно
+# старше и такой вход принимает. Поэтому стоп здесь, до входа в панель.
+# exit 3 = «нужно подтверждение», не «ошибка».
+if [ "$INBOUND_PROTOCOL" = "vless-tcp" ] && [ "$CONFIRM_PLAIN_VLESS" != "yes" ]; then
+    cat >&2 <<'ERR'
+СТОП (нужно подтверждение): vless-tcp — вход VLESS БЕЗ TLS.
+
+  Клиенты на Xray-core 26.7.11+ такую ссылку к публичному адресу не собирают:
+  «vless without TLS or other encryption is prohibited unless the server address
+  is a private IP or domain». Флага отключения нет. Без TLS UUID клиента к тому же
+  идёт по сети открытым текстом. Штатный вариант — INBOUND_PROTOCOL=vless-tls
+  (сертификат домена панели).
+
+  Осмысленно только для частного адреса (локальная сеть, Tailscale) — там запрет
+  ядра не действует. Тогда повтори запуск с CONFIRM_PLAIN_VLESS=yes.
+  См. knowledge/networking/_reference/vpn-protocols.md §6.8, ADR-0045.
+ERR
+    exit 3
+fi
 
 # --- Guard: Reality на РФ-сервере по умолчанию не создаётся -----------------
 # Вход клиентов на РФ-сервер не пересекает TSPU — маскировка (Reality/Vision)
@@ -61,7 +95,7 @@ if [ "$INBOUND_PROTOCOL" = "vless-reality" ] && [ "$SERVER_ROLE" = "ru-server" ]
 
   Вход «клиент в РФ → сервер в РФ» НЕ пересекает TSPU. Маскировка под Reality
   здесь обычно ничего не даёт: маскировать нечего и не от кого. Штатный вариант —
-  INBOUND_PROTOCOL=vless-tcp.
+  INBOUND_PROTOCOL=vless-tls (TLS — шифрование, не маскировка).
 
   Это не запрет. Если оператор осознанно хочет Reality на РФ-сервере (эксперимент,
   обучение, нестандартный кейс) — объясни ему «зачем обычно не нужно» и спроси
@@ -97,7 +131,7 @@ fi
 
 # Подготовка settings и streamSettings в зависимости от протокола
 case "$INBOUND_PROTOCOL" in
-    vless-tcp)
+    vless-tcp|vless-tls)
         SETTINGS_JSON="$(jq -nc \
             --arg uuid "$CLIENT_UUID" \
             --arg flow "$INBOUND_FLOW" \
@@ -119,7 +153,53 @@ case "$INBOUND_PROTOCOL" in
                 fallbacks: []
             }')"
 
-        STREAM_SETTINGS_JSON='{"network":"tcp","security":"none","tcpSettings":{"header":{"type":"none"}}}'
+        if [ "$INBOUND_PROTOCOL" = "vless-tcp" ]; then
+            # Без TLS — сюда доходим только через guard 2 (CONFIRM_PLAIN_VLESS=yes).
+            STREAM_SETTINGS_JSON='{"network":"tcp","security":"none","tcpSettings":{"header":{"type":"none"}}}'
+        else
+            # vless-tls: сертификат домена панели (ADR-0045). Пути берём из настроек
+            # панели — их выставляет /setup-vpn-panel; при входе по API-токену
+            # /panel/setting/all недоступен, тогда пути задаются явно.
+            TLS_SERVER_NAME="${TLS_SERVER_NAME:-$PANEL_DOMAIN}"
+            TLS_CERT_FILE="${TLS_CERT_FILE:-}"
+            TLS_KEY_FILE="${TLS_KEY_FILE:-}"
+            if [ -z "$TLS_CERT_FILE" ] || [ -z "$TLS_KEY_FILE" ]; then
+                PANEL_SETTINGS="$(api_call POST "/panel/setting/all" 2>/dev/null)" || PANEL_SETTINGS=""
+                if [ -z "$TLS_CERT_FILE" ]; then
+                    TLS_CERT_FILE="$(echo "$PANEL_SETTINGS" | jq -r '.obj.webCertFile // empty' 2>/dev/null || true)"
+                fi
+                if [ -z "$TLS_KEY_FILE" ]; then
+                    TLS_KEY_FILE="$(echo "$PANEL_SETTINGS" | jq -r '.obj.webKeyFile // empty' 2>/dev/null || true)"
+                fi
+            fi
+            if [ -z "$TLS_CERT_FILE" ] || [ -z "$TLS_KEY_FILE" ]; then
+                echo "ERROR: для vless-tls нет путей к сертификату: в настройках панели webCertFile/webKeyFile пусты (или недоступны)." >&2
+                echo "       Задай TLS_CERT_FILE и TLS_KEY_FILE явно или выпусти сертификат через /setup-vpn-panel." >&2
+                exit 2
+            fi
+            echo "[inbound] TLS: serverName=$TLS_SERVER_NAME cert=$TLS_CERT_FILE" >&2
+            # Пути — на СЕРВЕРЕ, а jq запускается у оператора. Git Bash/MSYS на Windows
+            # переписывает аргументы вида /root/... в C:/Program Files/Git/root/... при
+            # вызове нативного jq (замер 2026-10-14) — в панель ушёл бы несуществующий
+            # путь. MSYS_NO_PATHCONV (Git for Windows) и MSYS2_ARG_CONV_EXCL (MSYS2)
+            # конверсию отключают; на Linux/macOS эти переменные ни на что не влияют.
+            STREAM_SETTINGS_JSON="$(MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' jq -nc \
+                --arg sni "$TLS_SERVER_NAME" \
+                --arg cert "$TLS_CERT_FILE" \
+                --arg key "$TLS_KEY_FILE" \
+                '{
+                    network: "tcp",
+                    security: "tls",
+                    tlsSettings: {
+                        serverName: $sni,
+                        minVersion: "1.2",
+                        alpn: ["http/1.1"],
+                        certificates: [{certificateFile: $cert, keyFile: $key}],
+                        settings: {fingerprint: "chrome"}
+                    },
+                    tcpSettings: {acceptProxyProtocol: false, header: {type: "none"}}
+                }')"
+        fi
         ;;
 
     vless-reality)
@@ -182,7 +262,7 @@ case "$INBOUND_PROTOCOL" in
         ;;
 
     *)
-        echo "ERROR: INBOUND_PROTOCOL='$INBOUND_PROTOCOL' не поддерживается. Допустимо: vless-tcp, vless-reality" >&2
+        echo "ERROR: INBOUND_PROTOCOL='$INBOUND_PROTOCOL' не поддерживается. Допустимо: vless-tls, vless-reality, vless-tcp" >&2
         exit 2
         ;;
 esac

@@ -315,7 +315,7 @@ api_call POST "/panel/api/inbounds/del/1"
 
 ### 4.6 Шаблоны settings для разных протоколов
 
-#### VLESS-TCP (без Reality, для внутреннего РФ-трафика)
+#### VLESS + TLS (без Reality, вход на РФ-сервер — ADR-0045 мозга)
 
 ```json
 {
@@ -327,14 +327,38 @@ api_call POST "/panel/api/inbounds/del/1"
 }
 ```
 
-streamSettings:
+streamSettings (сертификат — тот, что выпустил `setup-vpn-panel` для домена панели;
+пути читаются из настроек панели `webCertFile`/`webKeyFile`):
 ```json
 {
   "network": "tcp",
-  "security": "none",
-  "tcpSettings": { "header": { "type": "none" } }
+  "security": "tls",
+  "tlsSettings": {
+    "serverName": "vpn.example.com",
+    "minVersion": "1.2",
+    "alpn": ["http/1.1"],
+    "certificates": [
+      { "certificateFile": "/root/cert/vpn.example.com/fullchain.pem",
+        "keyFile": "/root/cert/vpn.example.com/privkey.pem" }
+    ],
+    "settings": { "fingerprint": "chrome" }
+  },
+  "tcpSettings": { "acceptProxyProtocol": false, "header": { "type": "none" } }
 }
 ```
+
+`tlsSettings.settings.fingerprint` — откуда панель берёт `fp=` для ссылки (`alpn=` — из
+`tlsSettings.alpn`; `frontend/src/models/inbound.js`, `genVLESSLink`); перед передачей
+конфига в xray панель блок `settings` вырезает (`web/service/xray.go`) — сверено по
+исходникам v3.0.2, 2026-10-14. Ссылка клиента:
+`vless://UUID@vpn.example.com:443?type=tcp&encryption=none&security=tls&sni=vpn.example.com&alpn=http%2F1.1&fp=chrome#name`.
+
+#### VLESS без TLS — только к частному адресу
+
+Тот же `settings`, `streamSettings` = `{"network":"tcp","security":"none"}`. Клиенты на
+Xray-core 26.7.11+ такую ссылку к **публичному** адресу не собирают (`vpn-protocols.md`
+§6.8) — годится только для локальной сети / Tailscale. Скрипты мозга создают его лишь
+по `CONFIRM_PLAIN_VLESS=yes`.
 
 #### VLESS + Reality (для загр.VPS, маскировка от DPI)
 

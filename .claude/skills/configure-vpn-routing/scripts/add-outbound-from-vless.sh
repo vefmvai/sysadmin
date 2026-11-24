@@ -12,6 +12,8 @@
 #   VLESS_JSON   — JSON-результат parse-vless-link.sh (один объект)
 #   OUTBOUND_TAG_PREFIX — префикс tag (default: "upstream"). Скрипт добавляет
 #                        к нему индекс/имя из tag VLESS-ссылки.
+#   CONFIRM_PLAIN_VLESS — yes, чтобы осознанно добавить исходящее БЕЗ TLS/Reality
+#                        (только к частному адресу; иначе стоп, exit 3 — ADR-0045).
 #
 # Выход (на stdout): JSON с финальным tag созданного outbound.
 #   { "tag": "upstream-de" }
@@ -54,6 +56,29 @@ else
     SLUG="server"
 fi
 FINAL_TAG="${OUTBOUND_TAG_PREFIX}-${SLUG}"
+
+# --- Guard: исходящее VLESS без TLS/Reality не создаётся без подтверждения ---
+# Проверка Xray-core 26.7.11+ сидит в разборе конфига и действует и на СЕРВЕРНОЕ
+# ядро: исходящее VLESS без TLS к публичному адресу после обновления xray не даст
+# ядру запуститься — падает весь конфиг, а не одно подключение. ADR-0045.
+# VLESS Encryption в исходящем скрипт не строит (users[].encryption всегда "none").
+# exit 3 = «нужно подтверждение», не «ошибка».
+CONFIRM_PLAIN_VLESS="${CONFIRM_PLAIN_VLESS:-}"
+if [ "$SECURITY" != "tls" ] && [ "$SECURITY" != "reality" ] && [ "$CONFIRM_PLAIN_VLESS" != "yes" ]; then
+    echo "СТОП (нужно подтверждение): ссылка без TLS/Reality (security=${SECURITY}), адрес ${HOST}." >&2
+    cat >&2 <<'ERR'
+
+  Xray-core 26.7.11+ отвергает исходящее VLESS без TLS/Reality и без VLESS Encryption
+  к публичному адресу («vless without TLS or other encryption is prohibited…»). На
+  сервере это не одно сломанное подключение: после обновления xray весь конфиг не
+  запустится. Попроси у владельца сервера ссылку с security=tls или reality.
+
+  Осмысленно только для частного адреса (локальная сеть, Tailscale) — там запрет
+  ядра не действует. Тогда повтори запуск с CONFIRM_PLAIN_VLESS=yes.
+  См. knowledge/networking/_reference/vpn-protocols.md §6.8, ADR-0045.
+ERR
+    exit 3
+fi
 
 # Login
 api_login \
