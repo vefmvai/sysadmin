@@ -216,7 +216,7 @@ NEVER пропускать эту развязку. NEVER отвечать на 
 4. **ЧТО ПРОВЕРИЛ**: pre-check прошёл, ОС поддерживается, порты свободны,
    DNS резолвится корректно.
 5. **РИСК + ПЛАН ОТКАТА**: при ошибке выпуска cert — откат к бэкапу SQLite-БД.
-   При ошибке установки в целом — `ssh $SSH_TARGET '/usr/local/x-ui/x-ui
+   При ошибке установки в целом — `MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' ssh $SSH_TARGET '/usr/local/x-ui/x-ui
    uninstall'` (полное удаление панели, не трогает остальной сервер).
 6. **СТРАХОВКА + ПРОВЕРКА**: после установки — smoke check `curl -sI
    https://$DOMAIN:$PANEL_PORT/$WEB_BASE_PATH/` → 200 OK.
@@ -235,7 +235,7 @@ NEVER пропускать эту развязку. NEVER отвечать на 
 4. Рестартует `x-ui` для применения изменений.
 5. Проверяет, что `systemctl is-active x-ui` = active.
 
-**Verify:** `ssh $SSH_TARGET '/usr/local/x-ui/x-ui setting -show true'` —
+**Verify:** `MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' ssh $SSH_TARGET '/usr/local/x-ui/x-ui setting -show true'` —
 показывает новые значения port, username, webBasePath.
 
 ## Шаг 4: Выпуск TLS-сертификата
@@ -354,7 +354,7 @@ macOS, аналогично для других).
 
 ```bash
 # Полный uninstall — официальный путь
-ssh $SSH_TARGET '/usr/local/x-ui/x-ui uninstall'
+MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' ssh $SSH_TARGET '/usr/local/x-ui/x-ui uninstall'
 
 # Закрытие портов в UFW
 ssh $SSH_TARGET "ufw delete allow $PANEL_PORT/tcp; ufw delete allow 443/tcp; ufw reload"

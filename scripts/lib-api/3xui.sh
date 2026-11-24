@@ -783,7 +783,7 @@ api_gen_reality_keypair() {
     fi
 
     local output
-    output="$(ssh "$ssh_target" "/usr/local/x-ui/bin/xray-linux-amd64 x25519" 2>&1)" || {
+    output="$(MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' ssh "$ssh_target" "/usr/local/x-ui/bin/xray-linux-amd64 x25519" 2>&1)" || {
         _3xui_die "Не удалось сгенерировать Reality keypair: $output"
         return 1
     }
@@ -882,7 +882,9 @@ api_store_secret() {
             ;;
         bw)
             _3xui_require bw
-            bw create item "$(jq -n \
+            # Секрет может начинаться с «/» или содержать «=/» — под Git Bash нативный jq
+            # получил бы его переписанным. Локальных путей в вызове нет. msys-path-conversion.md
+            bw create item "$(MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' jq -n \
                 --arg name "$service" \
                 --arg user "$account" \
                 --arg pass "$secret" \

@@ -364,7 +364,7 @@ REMOTE_EOF
 echo "[tls] Smoke check: панель отвечает по HTTPS..."
 
 # Извлекаем PANEL_PORT и WEB_BASE_PATH через CLI на сервере
-PANEL_INFO="$(ssh "$SSH_TARGET" "/usr/local/x-ui/x-ui setting -show true" 2>&1)"
+PANEL_INFO="$(MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' ssh "$SSH_TARGET" "/usr/local/x-ui/x-ui setting -show true" 2>&1)"
 APPLIED_PORT="$(echo "$PANEL_INFO" | grep -iE "(panel|port)" | grep -oE '[0-9]{4,5}' | head -n1)"
 APPLIED_PATH_FULL="$(echo "$PANEL_INFO" | grep -iE "(webBasePath|panel.*Path|base.*path)" | head -n1)"
 APPLIED_PATH="$(echo "$APPLIED_PATH_FULL" | grep -oE '/[a-zA-Z0-9_-]+/' | head -n1)"

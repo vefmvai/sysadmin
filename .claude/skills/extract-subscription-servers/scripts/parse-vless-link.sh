@@ -134,8 +134,12 @@ PATH_PARAM="$(extract_qparam path)"
 HOST_HEADER="$(extract_qparam host)"
 SERVICE_NAME="$(extract_qparam serviceName)"
 
-# Эмитим JSON через jq для корректной escape
-jq -n \
+# Эмитим JSON через jq для корректной escape.
+# spx/path — пути на ЧУЖОМ сервере («/», «/api/v1/stream»): под Git Bash на Windows
+# нативный jq получил бы их переписанными в «C:/Program Files/Git/…» (так и испортились
+# 2 пути в разобранной подписке 2026-06). Локальных путей в вызове нет — конверсию
+# отключаем. knowledge/agent-runtime/_reference/msys-path-conversion.md
+MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' jq -n \
     --arg uuid "$UUID" \
     --arg host "$HOST" \
     --arg port "$PORT" \

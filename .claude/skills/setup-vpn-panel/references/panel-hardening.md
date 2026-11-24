@@ -15,7 +15,7 @@
 не «security through obscurity», а реальное расширение пространства
 поиска).
 
-**Аудит:** `ssh $TARGET '/usr/local/x-ui/x-ui setting -show true | grep -i user'`
+**Аудит:** `MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' ssh $TARGET '/usr/local/x-ui/x-ui setting -show true | grep -i user'`
 — значение не должно быть `admin`.
 
 ## 2. 32-символьный пароль

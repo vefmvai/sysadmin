@@ -79,7 +79,9 @@ extract_qparam() {
     fi
 }
 
-jq -n \
+# Секреты провайдера (base64-подобные) могут начинаться с «/» — под Git Bash нативный jq
+# получил бы их переписанными. Локальных путей в вызове нет. msys-path-conversion.md
+MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' jq -n \
     --arg password "$PASSWORD" \
     --arg host "$HOST" \
     --arg port "$PORT" \
