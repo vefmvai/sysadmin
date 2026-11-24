@@ -17,13 +17,22 @@
 #      поля из п.1 не будет. Второй механизм полностью под нашим контролем, поэтому
 #      бесконечный цикл «блок → ответ → блок» невозможен.
 #
+# НЕ УСПЕЛ — НЕ ТО ЖЕ, ЧТО «НЕПОНЯТНО» (ADR-0043). Проверка длиннее бюджета (15 с при
+# таймауте движка 20 с) — останавливаем один раз с просьбой проверить самому: оборванный
+# движком хук закончил бы ответ молча, как будто проверка прошла. С 06.10.2026 бюджет считает
+# сторож времени в конце файла — от старта хука, включая запуск python3 (ADR-0044, дополнение).
+#
 # FAIL-OPEN, в отличие от замка красной зоны. Здесь цена ошибки — расхождение документа,
 # а не потеря данных. Нет python3, нет транскрипта, что-то непонятно → молча пропускаем:
-# мешать работе ученика из-за дисциплинарной проверки неправильно.
+# мешать работе ученика из-за дисциплинарной проверки неправильно. Сломанный python3
+# (на Windows — заглушка Microsoft Store без Python, падает сразу) — то же, что его нет:
+# пропуск. Это постоянное свойство машины, а не сбой одного ответа — останавливать каждый
+# ответ из-за него значило бы мешать работе, ничего не проверив.
 #
 # ЧТО СЧИТАЕТСЯ ПРАВКОЙ (с 25.09.2026): команды управления (docker/systemctl/ufw/nginx/certbot,
 # пользователи, hostnamectl, x-ui), crontab кроме просмотра, запуск обёрток выкатки (имя со
-# словом deploy/update, служебные скрипты в /usr/local/sbin), git, меняющий рабочую копию на
+# словом deploy/update, кроме проверок и тестов — check/test/status в имени; служебные скрипты
+# в /usr/local/sbin), git, меняющий рабочую копию на
 # сервере, и ЗАПИСЬ ФАЙЛА в настройки сервера любым способом — `>`, tee, cp/install/rsync/scp,
 # sed -i, dd, tar -x, curl -o… — в /etc, /opt, /srv, /var/www, /usr/local, юниты systemd,
 # скрытые файлы root и пользователей, а `.env` и compose — в любом серверном каталоге.
@@ -60,12 +69,50 @@ set -uo pipefail
 # как «разрешаю»: замок молча пропускает то, ради чего поставлен (поймано 26.08.2026,
 # 16 случаев теста из 16). Разбор — building-enforcement.md, правило «немой замок».
 export PYTHONIOENCODING=utf-8
-RAW="$(cat)"
+
+# Вход — встроенным read, а не `cat`: до сторожа времени (конец файла) ни одного процесса.
+# Вход Stop-хука маленький (сессия, путь транскрипта, флаг) — побайтное чтение не дорого.
+IFS= read -r -d '' RAW || true
+
+# Метка «не успел» — своя, без python: сессия из входа, файл во временном каталоге.
+SESSIYA=""
+[[ $RAW =~ \"session_id\"[[:space:]]*:[[:space:]]*\"([A-Za-z0-9_.-]{1,100})\" ]] && SESSIYA="${BASH_REMATCH[1]}"
+METKA_VREMYA="${TMPDIR:-/tmp}/sysadmin-inv-guard-vremya-${SESSIYA:-bez-sessii}"
+
+# Предохранитель 1 — ещё до python (его повторяет и python-часть): движок сообщает, что
+# Stop-хук уже отработал в этом ходе. Здесь же сбрасываем метку «не успел»: продолжение после
+# нашей остановки пришло, следующая нехватка времени в другом ходе снова остановит ответ.
+if [[ $RAW =~ \"stop_hook_active\"[[:space:]]*:[[:space:]]*true ]]; then
+  [ -f "$METKA_VREMYA" ] && { printf '0' > "$METKA_VREMYA"; } 2>/dev/null
+  exit 0
+fi
 
 command -v python3 >/dev/null 2>&1 || exit 0   # fail-open
 
+# Бюджет всего хука, с — меньше таймаута движка из settings.json (20 с). Тот же, что BUDGET
+# python-части; переменная окружения может его только уменьшить — для теста этой ветки.
+HOOK_BUDGET=15
+if [[ "${INV_GUARD_BUDGET:-}" =~ ^[0-9]+$ ]] && (( INV_GUARD_BUDGET < HOOK_BUDGET )); then
+  HOOK_BUDGET="$INV_GUARD_BUDGET"
+fi
+
+# ── ПРОВЕРКА: python-часть, исполняется в фоне под сторожем времени (конец файла) ──
+# В функции, а не прямо внутри `<( )`: bash 3.2 разбирает heredoc внутри `<( )` по скобкам,
+# а в этом коде их полно в регулярных выражениях.
+proverit() {
 python3 - "$RAW" <<'PY'
-import sys, json, os, re, hashlib, tempfile
+import sys, json, os, re, hashlib, tempfile, time
+
+T0 = time.monotonic()
+# Бюджет разбора, с — меньше таймаута движка из settings.json (20 с), см. vremya_vyshlo.
+# Переменная окружения может его только уменьшить — для теста этой ветки.
+BUDGET = 15
+try:
+    _b = int(os.environ.get("INV_GUARD_BUDGET", ""))
+    if 0 <= _b < BUDGET:
+        BUDGET = _b
+except ValueError:
+    pass
 
 try:
     d = json.loads(sys.argv[1])
@@ -126,6 +173,50 @@ for i, rec in enumerate(records):
         c = m.get("content")
         last_user_text = c if isinstance(c, str) else json.dumps(c, ensure_ascii=False)
 turn = records[start:]
+
+# ── Предохранитель 2: один блок на ход, даже без stop_hook_active ─────────────
+def ostanovit_odin_raz(reason):
+    """Остановить ответ с причиной — не больше одного раза за ход; иначе молча выйти."""
+    key = hashlib.sha256((str(d.get("session_id", "")) + last_user_text[:400]).encode()).hexdigest()[:16]
+    tmpdir = tempfile.gettempdir()
+    mark = os.path.join(tmpdir, f"sysadmin-inv-guard-{key}")
+    # Убираем за собой: метки старше двух суток (§3.10) — иначе TMPDIR копит мусор.
+    try:
+        cutoff = time.time() - 2 * 86400
+        for name in os.listdir(tmpdir):
+            if name.startswith("sysadmin-inv-guard-"):
+                p = os.path.join(tmpdir, name)
+                if os.path.getmtime(p) < cutoff:
+                    os.remove(p)
+    except Exception:
+        pass
+    if os.path.exists(mark):
+        sys.exit(0)
+    try:
+        open(mark, "w").close()
+    except Exception:
+        sys.exit(0)                  # не смогли поставить метку — лучше пропустить, чем зациклить
+    print(json.dumps({"decision": "block", "reason": reason}, ensure_ascii=False))
+    sys.exit(0)
+
+# ── Время — часть контракта (ADR-0043, правило 3ж свода замков) ───────────────
+# Хук, не уложившийся в таймаут движка (20 с), движок обрывает и заканчивает ответ без
+# проверки — молча. Поэтому свой бюджет меньше: не успели разобрать ход — это не
+# «непонятно» (там fail-open), а «не проверено». Останавливаем ответ ОДИН раз и просим
+# агента проверить самому: пропустить молча значило бы выдать непроверенное за чистое.
+def vremya_vyshlo():
+    if time.monotonic() - T0 <= BUDGET:
+        return
+    ostanovit_odin_raz(f"""§3.2 — сторож inventory не успел разобрать этот ответ за {BUDGET} с.
+
+Прерванный по таймауту хук движок читает как «проверено», поэтому говорю прямо: проверки
+не было. Посмотри сам, были ли в этом ответе команды, меняющие инфраструктуру. Если были —
+обнови соответствующий документ inventory; если нет — скажи оператору одной строкой, что
+обновлять нечего.
+
+Останавливаю только один раз за ответ: закончишь снова — пропущу.""")
+
+vremya_vyshlo()                      # чтение большого транскрипта — тоже время
 
 # ── Что в этом ходе делали ────────────────────────────────────────────────────
 # Меняющие инфраструктуру команды. Только глаголы изменения: read-only (ps/status/df)
@@ -415,6 +506,19 @@ PREFIKSY = {"sudo", "doas", "env", "nohup", "exec", "time", "nice", "ionice", "t
 SLOVA_OBOLOCHKI = {"do", "then", "else", "elif", "if", "while", "until", "!", "{", "(", "exec"}
 VVOD_OBERTKI = re.compile(r"(?:^|\s)(?:\S*/)?(?:bash|sh|zsh|ssh)\s[^<|;&]*<\s*['\"]?(\S+?)['\"]?(?:\s|$)")
 
+# Слово deploy/update в имени — ещё не выкатка: то же слово у проверок и тестов. Ложная
+# остановка 26.09.2026: агент гонял у себя тесты хука `brain-update-check.sh` (и сам
+# `test-brain-update-check.sh`), сторож принял их за выкатку. Есть среди слов имени (через
+# `-` `_` `.`) слово проверки — это не обёртка. Цена: `deploy-check.sh`, если он вдруг
+# что-то меняет, пройдёт мимо; проверка с таким именем по смыслу ничего не выкатывает.
+NE_OBERTKA = {"check", "checks", "test", "tests", "status", "verify", "lint", "probe", "dry"}
+
+def obertka(put_):
+    if not OBERTKA.search(put_):
+        return False
+    imya = re.split(r"[/\\]", put_)[-1].lower()
+    return not (set(re.split(r"[-_.]", imya)) & NE_OBERTKA)
+
 def zapusk_obertki(probe):
     m = VVOD_OBERTKI.search(probe)                      # `ssh h bash -s prod < deploy.sh`: аргументы
     if m and OBERTKA.search(m.group(1)):                # между оболочкой и `<` не важны
@@ -434,7 +538,7 @@ def zapusk_obertki(probe):
             i += 1
             continue
         if w == "<" and i + 1 < len(slova):             # `ssh h bash -s < deploy.sh`
-            return bool(OBERTKA.search(slova[i + 1].strip("'\"")))
+            return obertka(slova[i + 1].strip("'\""))
         if w in ("-u", "-g", "-C", "-p") and i + 1 < len(slova):
             i += 2
             continue
@@ -442,7 +546,7 @@ def zapusk_obertki(probe):
                 or re.fullmatch(r"\d+[smhd]?", w):
             i += 1
             continue
-        return bool(OBERTKA.search(w))
+        return obertka(w)
     return False
 
 # git, меняющий рабочую копию на сервере (`cd /opt/app && git pull`, `git -C /opt/infra reset`).
@@ -689,6 +793,7 @@ def obnovil_inventory(cmd):
 
 changed, updated = [], False
 for rec in turn:
+    vremya_vyshlo()
     if rec.get("type") != "assistant":
         continue
     for block in (rec.get("message") or {}).get("content") or []:
@@ -710,30 +815,6 @@ for rec in turn:
 if not changed or updated:
     sys.exit(0)
 
-# ── Предохранитель 2: один блок на ход, даже без stop_hook_active ─────────────
-key = hashlib.sha256((str(d.get("session_id", "")) + last_user_text[:400]).encode()).hexdigest()[:16]
-tmpdir = tempfile.gettempdir()
-mark = os.path.join(tmpdir, f"sysadmin-inv-guard-{key}")
-
-# Убираем за собой: метки старше двух суток (§3.10) — иначе TMPDIR копит мусор.
-import time
-try:
-    cutoff = time.time() - 2 * 86400
-    for name in os.listdir(tmpdir):
-        if name.startswith("sysadmin-inv-guard-"):
-            p = os.path.join(tmpdir, name)
-            if os.path.getmtime(p) < cutoff:
-                os.remove(p)
-except Exception:
-    pass
-
-if os.path.exists(mark):
-    sys.exit(0)
-try:
-    open(mark, "w").close()
-except Exception:
-    sys.exit(0)                      # не смогли поставить метку — лучше пропустить, чем зациклить
-
 sample = "\n".join(f"  • {c}" for c in changed[:3])
 reason = f"""§3.2 — инфраструктура изменилась, inventory не обновлён.
 
@@ -751,5 +832,48 @@ reason = f"""§3.2 — инфраструктура изменилась, invent
 
 Останавливаю только один раз за ответ: закончишь снова — пропущу."""
 
-print(json.dumps({"decision": "block", "reason": reason}, ensure_ascii=False))
+ostanovit_odin_raz(reason)
 PY
+}
+# ── КОНЕЦ ПРОВЕРКИ ────────────────────────────────────────────────────────────
+
+# ── Сторож времени: бюджет покрывает ВЕСЬ хук (ADR-0044, дополнение 2026-10-06) ─
+# Раньше бюджет считала python-часть от своего старта, а запуск python3 и `cat` не считал
+# никто. На Windows `python3` — часто заглушка Microsoft Store (сотни миллисекунд даже в
+# покое), а на занятой машине запуск растягивается на десятки секунд: 03.10.2026 замок
+# красной зоны так шёл 36,5 с при таймауте 15 с. Устройство — как у замка: python-часть в
+# фоне, здесь только встроенный `read -t`; не дождались — «не успел» печатается встроенным
+# `printf`. Фоновая часть не держит трубы движка (stderr заменён насовсем); завершение
+# узнаётся по метке конца, а не по коду `read` и не по `$!` — так работает и bash 3.2.
+# Упавший python3 метку всё равно оставляет: это «нечем проверить» — fail-open, как и
+# раньше; «не успел» — только когда метки нет.
+#
+# «Один раз» без python: метка во временном каталоге по сессии. «1» — мы уже остановили ответ
+# по нехватке времени и ещё не видели продолжения: следующий раз пропускаем и сбрасываем.
+# Продолжение с stop_hook_active сбрасывает её выше. Не смогли записать метку — пропускаем:
+# лучше молча, чем зациклить.
+ne_uspel() {
+  local bylo=""
+  [ -f "$METKA_VREMYA" ] && { IFS= read -r bylo < "$METKA_VREMYA" || true; } 2>/dev/null
+  if [ "$bylo" = "1" ]; then
+    { printf '0' > "$METKA_VREMYA"; } 2>/dev/null
+    exit 0
+  fi
+  { printf '1' > "$METKA_VREMYA"; } 2>/dev/null || exit 0
+  printf '%s\n' '{"decision":"block","reason":"§3.2 — сторож inventory не успел разобрать этот ответ за '"$HOOK_BUDGET"' с.\n\nПрерванный по таймауту хук движок читает как «проверено», поэтому говорю прямо: проверки\nне было. Посмотри сам, были ли в этом ответе команды, меняющие инфраструктуру. Если были —\nобнови соответствующий документ inventory; если нет — скажи оператору одной строкой, что\nобновлять нечего.\n\nОстанавливаю только один раз за ответ: закончишь снова — пропущу."}'
+  exit 0
+}
+KONETS_PROVERKI='__KONETS_PROVERKI_STOROZHA__'
+OSTALOS=$(( HOOK_BUDGET - SECONDS ))
+(( OSTALOS > 0 )) || ne_uspel
+exec 3< <(exec 2>/dev/null; proverit; printf '%s' "$KONETS_PROVERKI")
+PROVERKA_PID="${!:-}"
+VERDIKT=""
+IFS= read -r -d '' -t "$OSTALOS" VERDIKT <&3
+case "$VERDIKT" in
+  *"$KONETS_PROVERKI") VERDIKT="${VERDIKT%"$KONETS_PROVERKI"}" ;;
+  *) [ -n "$PROVERKA_PID" ] && kill "$PROVERKA_PID" 2>/dev/null
+     ne_uspel ;;
+esac
+[ -n "$VERDIKT" ] && printf '%s' "$VERDIKT"
+exit 0

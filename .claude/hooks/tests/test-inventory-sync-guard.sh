@@ -8,9 +8,10 @@ set -uo pipefail
 # где замок исправен. Правило 3д свода замков.
 export PYTHONIOENCODING=utf-8
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
-# GUARD=<скрипт> — проверить другую версию хука (историческую или испорченную): тест, который
-# не краснеет на сломанной версии, ничего не доказывает (персона §3.11, свод замков правило 1).
-HOOK="${GUARD:-$HERE/inventory-sync-guard.sh}"
+# GUARD=<скрипт> (или INV_GUARD_HOOK — имя из PR #19) — проверить другую версию хука
+# (историческую или испорченную): тест, который не краснеет на сломанной версии, ничего не
+# доказывает (персона §3.11, свод замков правило 1).
+HOOK="${GUARD:-${INV_GUARD_HOOK:-$HERE/inventory-sync-guard.sh}}"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 # Метки предохранителя кладём в свой TMPDIR: иначе они переживают прогон и следующий
 # запуск тестов «пропускает» блокировки (метка = один блок на ход). Заодно не задеваем
@@ -39,7 +40,7 @@ PY
 }
 
 run() { # $1 = транскрипт, $2 = stop_hook_active (true|false)
-  python3 - "$1" "${2:-false}" <<'PY' | TMPDIR="$MARKS" PYTHONIOENCODING="${HOOK_ENC:-utf-8}" bash "$HOOK"
+  python3 - "$1" "${2:-false}" <<'PY' | TMPDIR="$MARKS" PYTHONIOENCODING="${HOOK_ENC:-utf-8}" INV_GUARD_BUDGET="${GUARD_BUDGET_ENV:-}" PATH="${HOOK_PATH:-$PATH}" bash "$HOOK"
 import json, sys, os
 # session_id стабилен между запусками (hash() в Python рандомизирован — метку бы не нашли).
 print(json.dumps({"session_id": os.path.basename(sys.argv[1]), "cwd": "/tmp/p",
@@ -482,6 +483,28 @@ mk "$TMP/wrap5.jsonl" "Bash:grep -n 'deploy.sh' README.md"
 check pass "grep со словом deploy.sh" "$TMP/wrap5.jsonl"
 mk "$TMP/wrap6.jsonl" "Bash:cat scripts/deploy/deploy-remote.sh"
 check pass "чтение самого скрипта выкатки" "$TMP/wrap6.jsonl"
+# Сужение 26.09.2026: слово deploy/update у проверок и тестов — не выкатка. Первые два случая —
+# дословно ложные остановки той сессии (агент гонял у себя тесты хука проверки обновлений).
+# Каждому случаю — свой транскрипт: метка «одна остановка за ход» привязана к его имени.
+n=0
+for c in \
+  "bash brain-update-check.sh --status </dev/null" \
+  "bash .claude/hooks/tests/test-brain-update-check.sh 2>&1" \
+  "./scripts/check-updates.sh" \
+  "ssh prod-host 'sudo /usr/local/sbin/update-status'" \
+  "bash scripts/deploy-dry-run.sh" \
+  "./test_deploy.sh"; do
+  n=$((n+1)); mk "$TMP/wrapok$n.jsonl" "Bash:$c"; check pass "проверка, не выкатка: $c" "$TMP/wrapok$n.jsonl"
+done
+# Контроль: настоящие обёртки с теми же словами по-прежнему останавливают.
+for c in \
+  "./update-certs.sh" \
+  "ssh prod-host 'sudo /opt/app/self_update.sh'" \
+  "ssh prod-host 'sudo /usr/local/sbin/deploy-run site'" \
+  "bash scripts/deploy-app.sh" \
+  "ssh prod-host 'cd /opt/bot && ./redeploy.sh'"; do
+  n=$((n+1)); mk "$TMP/wrapbad$n.jsonl" "Bash:$c"; check block "обёртка выкатки: $c" "$TMP/wrapbad$n.jsonl"
+done
 
 echo "[3] Изменение + обновление inventory — пропускаем"
 mk "$TMP/ok1.jsonl" "Bash:ssh prod-host 'docker compose up -d'" "Edit:/infra/inventory/hosts/prod-host/services.md"
@@ -548,6 +571,102 @@ else
   FAIL=$((FAIL+1)); echo "  ❌ причина при cp1252 пуста или искажена"
 fi
 unset HOOK_ENC
+
+echo "[7] Сторож укладывается в своё время сам (ADR-0043, правило 3ж)"
+# Хук, оборванный движком по таймауту, заканчивает ответ без проверки — молча, как будто
+# проверка прошла. Сторож обязан успеть сам: свой бюджет меньше таймаута движка, не успел —
+# один раз останавливает ответ с просьбой проверить самому.
+ok7()  { PASS=$((PASS+1)); printf '  ✅ %s\n' "$1"; }
+bad7() { FAIL=$((FAIL+1)); printf '  ❌ %s\n' "$1"; }
+G_BUDGET="$(grep -Eo '^BUDGET = [0-9]+' "$HOOK" | grep -Eo '[0-9]+$')"
+G_ENGINE="$(python3 - "$HERE/../settings.json" <<'PY' 2>/dev/null
+import json, sys
+d = json.load(open(sys.argv[1], encoding="utf-8"))
+for m in d.get("hooks", {}).get("Stop", []):
+    for h in m.get("hooks", []):
+        if "inventory-sync-guard.sh" in h.get("command", ""):
+            print(h.get("timeout", 60))
+PY
+)"
+if [ -z "$G_BUDGET" ] || [ -z "$G_ENGINE" ]; then
+  bad7 "не прочитал бюджет сторожа (${G_BUDGET:-нет}) или таймаут движка (${G_ENGINE:-нет})"
+elif [ "$G_ENGINE" -gt $((G_BUDGET + 3)) ]; then
+  ok7 "бюджет ${G_BUDGET} с с запасом меньше таймаута движка ${G_ENGINE} с"
+else
+  bad7 "бюджет ${G_BUDGET} с не оставляет запаса до таймаута движка ${G_ENGINE} с"
+fi
+# Бюджет навязан подопечному через env (правило 3д) и сведён к нулю: ход БЕЗ изменений,
+# то есть остановка может прийти только из ветки «не успел».
+GUARD_BUDGET_ENV=0
+mk "$TMP/budget.jsonl" "Bash:docker ps -a"
+B_OUT="$(run "$TMP/budget.jsonl" 2>/dev/null)"
+if grep -q '"decision": *"block"' <<<"$B_OUT" && grep -q 'не успел' <<<"$B_OUT"; then
+  ok7 "бюджет исчерпан — ответ остановлен с «не успел», а не пропущен молча"
+else
+  bad7 "при исчерпанном бюджете сторож не остановил ответ: ${B_OUT:0:120}"
+fi
+B_OUT="$(run "$TMP/budget.jsonl" 2>/dev/null)"
+if grep -q '"decision": *"block"' <<<"$B_OUT"; then bad7 "второй раз в том же ходе снова остановил — зацикливание"
+else ok7 "второй раз в том же ходе — пропускает (не больше одной остановки)"; fi
+unset GUARD_BUDGET_ENV
+G_CODE="$(grep -v '^[[:space:]]*#' "$HOOK")"
+if grep -qF '0 <= _b < BUDGET' <<<"$G_CODE"; then ok7 "переменная окружения может бюджет только уменьшить"
+else bad7 "не нашёл ограничения «только уменьшить» для INV_GUARD_BUDGET"; fi
+
+echo "[8] Бюджет покрывает весь сторож, а не только python-часть (ADR-0044, дополнение 2026-10-06)"
+# Дефект: бюджет считала python-часть от СВОЕГО старта, а запуск python3 и `cat` не считал
+# никто. На Windows python3 — часто заглушка Microsoft Store, под нагрузкой её запуск тянется
+# десятки секунд (03.10.2026 замок красной зоны так шёл 36,5 с). Медленный запуск
+# подстраиваем подставным python3 только в PATH сторожа (правило 3д), бюджет — 2 с. Время —
+# по захвату stdout И stderr: висящий хвост проверки не должен держать трубы движка.
+now_ms() {   # часы без процессов и без GNU date (`date +%s%N` на macOS печатает N)
+  if [ -n "${EPOCHREALTIME:-}" ]; then local t="${EPOCHREALTIME/[.,]/}"; NOW_MS=$(( 10#$t / 1000 ))
+  else NOW_MS=$(( SECONDS * 1000 )); fi
+}
+MEDL="$TMP/medlennyj"; mkdir -p "$MEDL"
+printf '#!/usr/bin/env bash\nsleep 8\nexit 1\n' > "$MEDL/python3"; chmod +x "$MEDL/python3"
+mk "$TMP/medl.jsonl" "Bash:ssh prod-host 'docker compose up -d api'"
+# Порядок важен: после продолжения (stop_hook_active сбрасывает метку) нехватка времени
+# снова останавливает — значит, сброс работает; повтор без продолжения — пропуск.
+for spec in "block|медленный python3 — «не успел»|false|не успел" \
+            "pass|продолжение после остановки (stop_hook_active) — пропуск|true|" \
+            "block|после продолжения нехватка времени снова останавливает|false|не успел" \
+            "pass|тот же ход ещё раз без продолжения — пропуск (не больше одной остановки)|false|"; do
+  want="${spec%%|*}"; rest="${spec#*|}"; desc="${rest%%|*}"; rest="${rest#*|}"; act="${rest%%|*}"; slovo="${rest#*|}"
+  now_ms; s=$NOW_MS
+  OUT="$(HOOK_PATH="$MEDL:$PATH" GUARD_BUDGET_ENV=2 run "$TMP/medl.jsonl" "$act" 2>&1)"
+  now_ms; ms=$(( NOW_MS - s ))
+  got="pass"; grep -q '"decision": *"block"' <<<"$OUT" && got="block"
+  if [ "$got" = "$want" ] && [ "$ms" -lt 4000 ] && { [ -z "$slovo" ] || grep -q "$slovo" <<<"$OUT"; }; then
+    ok7 "${desc} — ${got}, ${ms} мс"
+  else
+    bad7 "${desc} — ожидали ${want} быстрее 4 с, получили ${got} за ${ms} мс${OUT:+: ${OUT:0:90}}"
+  fi
+done
+# Сломанный python3 — то же, что его нет: fail-open по решению ADR-0023 (дисциплинарная
+# проверка не мешает работе). Это постоянное свойство машины, а не сбой одного ответа.
+SLOM="$TMP/slomannyj"; mkdir -p "$SLOM"
+printf '#!/usr/bin/env bash\necho "Python was not found; run without arguments to install from the Microsoft Store" >&2\nexit 9009\n' > "$SLOM/python3"
+chmod +x "$SLOM/python3"
+mk "$TMP/slom.jsonl" "Bash:ssh prod-host 'docker compose up -d api'"
+OUT="$(HOOK_PATH="$SLOM:$PATH" run "$TMP/slom.jsonl" 2>&1)"
+if grep -q '"decision": *"block"' <<<"$OUT"; then bad7 "сломанный python3 — остановил ответ, а политика сторожа — пропуск"
+else ok7 "сломанный python3 — пропуск, как при отсутствии python3 (fail-open)"; fi
+# Переносимость сторожа времени (правило 3г: поведение другой версии bash здесь не
+# воспроизвести — проверяем текст): на bash 3.2 `$!` после `<( )` не задан, под `set -u`
+# голое `$!` обрывает хук; код `read -t` по таймауту (>128) есть только с bash 4.0.
+STRAZH="$(sed -n '/^# ── Сторож времени/,$p' "$HOOK" | grep -v '^[[:space:]]*#')"
+if [ -z "$STRAZH" ]; then bad7 "сторож времени не найден по маркеру — проверять нечего"
+else
+  if grep -Eq '=\$!([^:]|$)' <<<"$STRAZH"; then bad7 "номер фоновой проверки — голым \$! (bash < 4.4 упадёт)"
+  else ok7 "номер фоновой проверки — \${!:-}"; fi
+  if grep -Eq '\$\?[[:space:]]*>[[:space:]]*128' <<<"$STRAZH" || ! grep -q 'KONETS_PROVERKI' <<<"$STRAZH"; then
+    bad7 "завершение проверки узнаётся не по метке конца"
+  else ok7 "завершение проверки — по метке конца, а не по коду read"; fi
+fi
+H_BUDGET="$(grep -Eo '^HOOK_BUDGET=[0-9]+' "$HOOK" | cut -d= -f2)"
+if [ -n "$H_BUDGET" ] && [ "$H_BUDGET" = "$G_BUDGET" ]; then ok7 "бюджет обвязки = бюджет python-части (${H_BUDGET} с)"
+else bad7 "бюджет обвязки (${H_BUDGET:-нет}) не совпадает с python-частью (${G_BUDGET:-нет})"; fi
 
 echo "─────────────────────────────────────────────────────────"
 printf 'Итог: %d прошло, %d провалено\n' "$PASS" "$FAIL"
