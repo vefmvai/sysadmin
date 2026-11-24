@@ -5,7 +5,8 @@ description: |
   клиентов в его панели 3X-UI: vless://-URI, sing-box JSON под платформу
   (iOS / Android / desktop / universal), QR-код через qrencode. Использует
   REST API панели для чтения inbound и client UUID. Стратегия совместимости:
-  нижняя планка sing-box 1.11.x (из-за застрявшего sing-box-vt на iOS),
+  конфиг для sing-box 1.10–1.14 (поле TUN address — старые inet4/inet6_address
+  удалены в 1.12; без секции dns и outbound block/dns; проверено sing-box check 1.14.3),
   с учётом ограничений каждой платформы (iOS не имеет process_name/
   strict_route, Android умеет package_name, desktop — всё).
   Триггеры: «сделай VPN-конфиг для iPhone», «сгенерируй vless-ссылку», «QR-код
@@ -145,9 +146,11 @@ REPORT_LANGUAGE=$(get_agent_field '.operator.language' '.language' ru)
 1. Парсит сгенерированный vless://-link через `parse-vless-link.sh`
    из `/configure-vpn-routing` (общая зависимость).
 2. По `PLATFORM` выбирает inbound:
-   - `ios`/`android`: TUN с `inet4_address`+`inet6_address` (старый формат, для
-     совместимости с sing-box 1.9-1.11).
-   - `desktop`: TUN с `address` (1.10+) + `auto_redirect` + `strict_route`.
+   - `ios`/`android`: TUN с `address` (1.10+). До 2026-10-14 здесь были `inet4_address`+
+     `inet6_address` — удалены в sing-box 1.12.0, конфиг падал с FATAL на всех актуальных
+     клиентах (проверено sing-box 1.14.3).
+   - `desktop`: TUN с `address` + `strict_route`, без `auto_redirect` — он только для Linux,
+     Windows-овый sing-box такой конфиг отвергает (проверено 2026-10-14).
    - `universal`: mixed inbound на 127.0.0.1:2080 (Hiddify-app сам обернёт в TUN).
 3. Outbound VLESS с Reality/TLS-блоком из vless-link.
 4. Routing (если `USE_RULE_SET=yes`): `geoip-ru` + `geosite-category-ru`
@@ -187,8 +190,11 @@ REPORT_LANGUAGE=$(get_agent_field '.operator.language' '.language' ru)
   sing-box JSON у него — опциональная подкладка (для sing-box-клиентов он основной).
 
 ⚠ Совместимость по версиям sing-box (для sing-box-клиентов):
-  - На iOS реально работает 1.11.x (sing-box-vt застрял на 1.11.4 с февраля 2025).
-  - Этот конфиг сгенерирован под нижнюю планку — должен работать на iOS, Android, desktop.
+  - sing-box-vt (1.11.4) снят из App Store; на iOS теперь sing-box MT (ветка 1.14,
+    changelog sing-box 1.14.0), Karing и Hiddify — на ядре sing-box.
+  - Конфиг — для sing-box 1.10–1.14: поле TUN `address`, без секции dns и outbound
+    block/dns. Все четыре платформы прогоняются через `sing-box check` 1.14.3 регресс-тестом
+    `tests/test-singbox-config-valid.sh` (нужен `SINGBOX_BIN`); версии 1.10–1.13 живьём не проверены.
   - Happ (Xray-ядро) этим ограничением не связан.
 
 ⚠ RU App Store (на 2026-05-24):
@@ -211,8 +217,10 @@ rm -rf "$OUTPUT_DIR"
 
 - **`vless://` с `&` в shell без quoting** — символ `&` ломает shell-парсинг.
   Всегда передавать в кавычках: `cmd "vless://...&..."`.
-- **Конфиг с фичами 1.12+ для iOS** — на iPhone у sing-box-vt — 1.11.4. Скилл
-  при `PLATFORM=ios` НЕ использует AnyTLS, TLS-fragment, evaluate, package_name_regex.
+- **Конфиг с фичами новее планки** — скилл при `PLATFORM=ios` по-прежнему НЕ использует
+  AnyTLS, TLS-fragment, evaluate, package_name_regex (evaluate и package_name_regex — с 1.14.0).
+  Причина «sing-box-vt застрял на 1.11.4» снята (клиент убран из App Store);
+  ограничение оставлено как консервативное до живой проверки на sing-box MT / Karing.
 - **`flow=xtls-rprx-vision` на старом v2rayNG** — для клиентов на Xray-ядре
   с версией < 1.8 этот flow не работает. Скилл проверяет тип клиента через
   параметр `PLATFORM` (на ios/android Hiddify/Karing — поддерживают).

@@ -2,11 +2,13 @@
 # generate-singbox-json.sh — собрать sing-box JSON-конфиг под платформу
 # и vless://-link сервера.
 #
-# Стратегия совместимости (см. client-apps.md §9.3):
-#   PLATFORM=ios     → sing-box 1.11.x (без AnyTLS, TLS-fragment, evaluate)
-#   PLATFORM=android → sing-box 1.12.x
-#   PLATFORM=desktop → sing-box 1.13.x
-#   PLATFORM=universal (default) → sing-box 1.11.x — везде работает
+# Стратегия совместимости (см. client-apps.md §9.3): конфиг для sing-box 1.10–1.14.
+#   Поле TUN `address` (есть с 1.10.0) на всех платформах: старые inet4_address/inet6_address
+#   удалены в 1.12.0 — с ними конфиги для iOS/Android не запускались (FATAL, проверено sing-box
+#   1.14.3, 2026-10-14). Секцию dns и outbound block/dns (удалены в 1.13–1.14) не создаём.
+#   Без AnyTLS, TLS-fragment, evaluate, package_name_regex (консервативно).
+#   PLATFORM=desktop — Windows/macOS/Linux: без auto_redirect (только Linux — на Windows
+#   sing-box отвергает конфиг). Регресс: ../tests/test-singbox-config-valid.sh
 #
 # Вход через ENV:
 #   VLESS_URL    — vless://-URI клиента (от generate-vless-link.sh)
@@ -100,8 +102,7 @@ case "$PLATFORM" in
         INBOUND="$(jq -nc '{
             type: "tun",
             tag: "tun-in",
-            inet4_address: "172.19.0.1/30",
-            inet6_address: "fdfe:dcba:9876::1/126",
+            address: ["172.19.0.1/30", "fdfe:dcba:9876::1/126"],
             auto_route: true,
             stack: "system"
         }')"
@@ -110,8 +111,7 @@ case "$PLATFORM" in
         INBOUND="$(jq -nc '{
             type: "tun",
             tag: "tun-in",
-            inet4_address: "172.19.0.1/30",
-            inet6_address: "fdfe:dcba:9876::1/126",
+            address: ["172.19.0.1/30", "fdfe:dcba:9876::1/126"],
             auto_route: true,
             stack: "system"
         }')"
@@ -122,7 +122,6 @@ case "$PLATFORM" in
             tag: "tun-in",
             address: ["172.19.0.1/30", "fdfe:dcba:9876::1/126"],
             auto_route: true,
-            auto_redirect: true,
             strict_route: true,
             stack: "mixed",
             mtu: 1500

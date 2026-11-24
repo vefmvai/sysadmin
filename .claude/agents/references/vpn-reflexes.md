@@ -64,13 +64,25 @@ Anthropic API», «pip/npm не качает» — на сервере с уже
 **Триггер:** оператор просит «дай VPN-конфиг для iPhone», «sing-box
 JSON», «настрой Hiddify на iOS» и т.п.
 
-**Действие:** основной клиент — **Happ**; для sing-box-конфигов нижняя планка ядра 1.11.x.
+**Действие:** основной клиент — **Happ**; в sing-box-конфигах — ничего из удалённого в
+sing-box 1.12–1.14 (поля TUN `inet4_address`/`inet6_address`, старые форматы DNS-серверов,
+special outbounds `block`/`dns`).
+<!-- 2026-10-14: было «для sing-box-конфигов нижняя планка ядра 1.11.x» — планку держал sing-box-vt, его сняли из App Store (changelog sing-box 1.14.0) -->
+
+**Сверка 2026-10-14.** `sing-box-vt` убран из App Store; iOS/tvOS-клиент вернулся как
+**sing-box MT** (ветка 1.14; changelog 1.14.0). В 1.14.0 удалены старые форматы DNS-серверов,
+в 1.13.0 — special outbounds `block`/`dns`: конфиг «под 1.11» с секцией `dns` на актуальных
+клиентах не запустится. **Генератор `generate-singbox-json.sh` до 2026-10-14 писал для iOS и
+Android поля TUN, удалённые в 1.12.0** — такие конфиги не запускались ни на одном актуальном
+клиенте (FATAL на sing-box 1.14.3); для desktop — `auto_redirect`, который Windows-овый
+sing-box отвергает. Исправлено: поле `address` везде, без `auto_redirect`; конфиг — для
+1.10–1.14, живьём проверен на 1.14.3 (`generate-client-config/tests/test-singbox-config-valid.sh`).
 - **Основной рекомендованный клиент — `Happ` («Happ — Proxy Utility», happ.su).**
   Кроссплатформенный (iPhone, Android, Windows, macOS, Linux), на Xray-ядре,
   умеет on-device routing (читает routing-профиль, см. `client-apps.md` §3.6,
   `routing-on-device-xray.md`) — именно поэтому он годится и как канал, и как
   инструмент маршрутизации на клиенте. Альтернативы: `Hiddify Proxy & VPN`,
-  `Karing`, `v2rayN`, `sing-box` (sing-box-vt/SFA), `v2rayNG`.
+  `Karing`, `v2rayN`, `sing-box` (sing-box MT/SFA), `v2rayNG`.
 - **Установка.** На десктоп (Windows/macOS/Linux) — просто скачать с **happ.su**
   (все ссылки: https://www.happ.su/main/ru). На iPhone — поставить из App Store,
   но в RU App Store **сейчас нет ни Happ, ни Hiddify** — поэтому для установки
@@ -79,9 +91,10 @@ JSON», «настрой Hiddify на iOS» и т.п.
 - Старый аргумент «рекомендуем Hiddify, потому что Happ удалён, а Hiddify нет» —
   **несостоятелен**: удаление из RU App Store бьёт по обоим, и для iPhone в любом
   случае нужна смена региона. «Не удалён» больше не преимущество Hiddify.
-- `sing-box-vt` (де-факто продолжение SagerNet SFI после удаления из
-  App Store 01.08.2024) застрял на 1.11.4 от 24.02.2025 — отстаёт от
-  мейнлайна на 4 минора. Поэтому в **sing-box**-конфигах не использую фичи 1.12+
+- *История:* `sing-box-vt` (продолжение SagerNet SFI после удаления из
+  App Store 01.08.2024) застрял на 1.11.4 и снят из App Store (changelog sing-box 1.14.0; дата
+  снятия — ? уточнить; см. сверку выше). Прежнее правило
+  было: в **sing-box**-конфигах не использую фичи 1.12+
   (AnyTLS, TLS fragment, новый DNS-формат, evaluate, package_name) — иначе конфиг
   не запустится. На Happ (Xray-ядро) это ограничение не распространяется.
 
