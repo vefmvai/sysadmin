@@ -7,7 +7,11 @@ set -uo pipefail
 # (Windows cp1252) она падает и подаёт хуку пустой вход — тест «проваливается» там,
 # где замок исправен. Правило 3д свода замков.
 export PYTHONIOENCODING=utf-8
-HOOK="$(cd "$(dirname "$0")/.." && pwd)/inventory-sync-guard.sh"
+HERE="$(cd "$(dirname "$0")/.." && pwd)"
+# GUARD=<скрипт> (или INV_GUARD_HOOK — имя из PR #19) — проверить другую версию хука
+# (историческую или испорченную): тест, который не краснеет на сломанной версии, ничего не
+# доказывает (персона §3.11, свод замков правило 1).
+HOOK="${GUARD:-${INV_GUARD_HOOK:-$HERE/inventory-sync-guard.sh}}"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 # Метки предохранителя кладём в свой TMPDIR: иначе они переживают прогон и следующий
 # запуск тестов «пропускает» блокировки (метка = один блок на ход). Заодно не задеваем
@@ -22,7 +26,9 @@ mk() { # $1 = файл, далее пары "Bash:команда" / "Edit:пут
     printf '%s\n' '{"type":"user","message":{"role":"user","content":"почини сервис"}}'
     for spec in "$@"; do
       local tool="${spec%%:*}" arg="${spec#*:}"
-      python3 - "$tool" "$arg" <<'PY'
+      # Перевод путей Git Bash запрещён: команду, начинающуюся с `/` (`/usr/bin/crontab -r`),
+      # он переписал бы в виндовый путь, и тест проверял бы не ту строку (25.09.2026).
+      MSYS2_ARG_CONV_EXCL='*' python3 - "$tool" "$arg" <<'PY'
 import json, sys
 tool, arg = sys.argv[1], sys.argv[2]
 inp = {"command": arg} if tool == "Bash" else {"file_path": arg, "new_string": "x"}
@@ -34,7 +40,7 @@ PY
 }
 
 run() { # $1 = транскрипт, $2 = stop_hook_active (true|false)
-  python3 - "$1" "${2:-false}" <<'PY' | TMPDIR="$MARKS" PYTHONIOENCODING="${HOOK_ENC:-utf-8}" bash "$HOOK"
+  python3 - "$1" "${2:-false}" <<'PY' | TMPDIR="$MARKS" PYTHONIOENCODING="${HOOK_ENC:-utf-8}" INV_GUARD_BUDGET="${GUARD_BUDGET_ENV:-}" PATH="${HOOK_PATH:-$PATH}" bash "$HOOK"
 import json, sys, os
 # session_id стабилен между запусками (hash() в Python рандомизирован — метку бы не нашли).
 print(json.dumps({"session_id": os.path.basename(sys.argv[1]), "cwd": "/tmp/p",
@@ -64,6 +70,391 @@ check pass "echo с текстом команды" "$TMP/ro3.jsonl"
 mk "$TMP/ro4.jsonl" "Bash:cat /etc/systemd/system/app.service | head -20"
 check pass "чтение unit-файла" "$TMP/ro4.jsonl"
 
+echo "[1б] Просмотр расписания crontab -l — не изменение (холостые остановки 04.08 и 25.09.2026)"
+# Первые две строки — команды (имена хостов обобщены), на которых сторож остановил ход 25.09.2026
+# (его собственный отчёт: «crontab -l 2>&1», «crontab -l 2>/dev/null»).
+n=0
+for c in \
+  "ssh -o BatchMode=yes prod-host 'echo \"== root crontab\"; sudo crontab -l 2>&1 | grep -v \"^#\" | grep -v \"^\$\"'" \
+  "ssh -o BatchMode=yes edge-host 'sudo ls /etc/cron.d; sudo crontab -l 2>/dev/null | grep -v \"^#\"'" \
+  "sudo crontab -u root -l" \
+  "crontab -l -u deploy" \
+  "crontab -l > /tmp/cron.bak" \
+  "command -v crontab >/dev/null 2>&1 || echo нет" \
+  "dpkg -S crontab" \
+  "find / -name crontab 2>/dev/null" \
+  "sudo cp -p /etc/cron.d/backup /root/cron.d-backup.bak-2026-09-25" \
+  "ls -la /etc/crontab /var/spool/cron/crontabs/" \
+  "ssh h 'sudo cp -a /etc/cron.d/ /root/bak/cron.d/'" \
+  "scp -r h:/etc/cron.d/ ./snapshots/prod-host/cron.d/" \
+  "docker cp app:/etc/cron.d/ ./snap/cron.d/" \
+  "cat /etc/cron.d/backup | tee /tmp/snap/cron.d/backup" \
+  "rsync -a /etc/cron.d/ /root/backup/cron.d-2026-09-25/" \
+  "sudo cp /etc/crontab /etc/crontab.bak" \
+  "journalctl --since today | grep -iE 'cron|crontab'" \
+  "grep -E \"REPLACE|crontab\" /var/log/syslog" \
+  "ls -l \$(which crontab) /var/spool/cron/crontabs" \
+  "find / -name \"crontab*\" 2>/dev/null" \
+  "find / -name crontab -type f 2>/dev/null" \
+  "crontab -l > ~/crontab-\$(date +%F).bak" \
+  "crontab -l | tee /tmp/crontab-root.txt" \
+  "if [ -n \"\$(crontab -l 2>/dev/null)\" ]; then echo есть; fi" \
+  "journalctl -t crontab --since today" \
+  "sudo crontab -l          # личное расписание root" \
+  $'crontab -l \\\n  | grep -v \'^#\'' \
+  "zgrep crontab /var/log/syslog.2.gz" \
+  "crontab -u \$(id -un) -l" \
+  "diff <(crontab -l) /tmp/cron.expected" \
+  "run-parts --test /etc/cron.daily" \
+  "sed -n '1,20p' /etc/cron.d/backup" \
+  "crontab -T /tmp/new.cron" \
+  "crontab -V" \
+  "perl -ne 'print' /etc/nginx/nginx.conf" \
+  "certbot certificates" \
+  "sudo certbot certificates 2>/dev/null | grep -E \"Domains|Expiry\"" \
+  "ls -la /etc/cron.d/certbot /lib/systemd/system/certbot.timer" \
+  "acme.sh --list"; do
+  n=$((n+1)); mk "$TMP/cronro$n.jsonl" "Bash:$c"
+  check pass "просмотр: ${c:0:60}" "$TMP/cronro$n.jsonl"
+done
+
+echo "[2б] Запись расписания — останавливаем при любой форме"
+# Установочная строка берётся ИЗ ШАБЛОНА скилла, а не из головы (правило 2 свода замков):
+# именно ею setup-backups кладёт расписание, и замок её раньше не видел.
+TPL="$HERE/../skills/setup-backups/templates/backup-cron-d"
+INSTALL_LINE="$(sed -n 's/^#[[:space:]]*\(install -m [0-9]* .*cron\.d.*\)$/\1/p' "$TPL" | head -1)"
+if [ -z "$INSTALL_LINE" ]; then
+  FAIL=$((FAIL+1)); echo "  ❌ потерян источник: в $TPL нет строки install … /etc/cron.d/…"
+fi
+n=0
+for c in \
+  "(crontab -l; echo \"0 3 * * * /opt/x.sh\") | crontab -" \
+  "crontab -l | sed '/old-job/d' | crontab -" \
+  "echo '*/5 * * * * /opt/check.sh' | sudo crontab -u root -" \
+  "echo '* * * * * /opt/x' | crontab" \
+  "ssh prod-host 'crontab /tmp/new.cron'" \
+  "ssh prod-host 'sudo crontab -r'" \
+  "crontab -e" \
+  "ssh prod-host \"crontab -l > /tmp/c; echo x >> /tmp/c; crontab /tmp/c\"" \
+  "crontab < /tmp/new.cron" \
+  "ssh prod-host 'sudo $INSTALL_LINE'" \
+  "ssh prod-host \"sudo sed -i 's/^0 22/0 21/' /etc/cron.d/backup\"" \
+  "cat new.cron | ssh prod-host 'sudo tee /etc/cron.d/backup >/dev/null'" \
+  "ssh prod-host 'sudo cp backup.cron /etc/cron.d/ 2>&1'" \
+  "/usr/bin/crontab -r" \
+  "sudo /usr/bin/crontab -u app /tmp/new.cron" \
+  "ssh h 'crontab -l | grep -v old-job | /usr/bin/crontab -'" \
+  "\\crontab -r" \
+  "crontab <(crontab -l | grep -v old-job)" \
+  "crontab < <(crontab -l; echo \"0 3 * * * /opt/b.sh\")" \
+  "crontab <<<\"\$(crontab -l; echo '0 3 * * * /opt/b.sh')\"" \
+  "sudo cp /root/crontab /etc/crontab" \
+  "sudo cp new.cron /var/spool/cron/crontabs/app" \
+  "sudo cp backup.cron /etc/cron.d" \
+  "scp backup.cron root@h:/etc/cron.d/backup" \
+  "sudo cp backup.cron /etc/cron.d/backup 2> /dev/null" \
+  "sudo cp -t /etc/cron.d/ backup.cron" \
+  "sudo sed -i.bak 's/^0 3/0 4/' /etc/cron.d/backup" \
+  "sudo sed -e 's/^0 3/0 4/' -i /etc/crontab" \
+  "sudo mv /etc/cron.d/backup /root/backup.cron.disabled" \
+  "ssh h 'sudo rm -f /etc/cron.d/old-job'" \
+  "echo '0 3 * * * root /opt/b.sh' > /etc/cron.d/backup" \
+  "sudo sh -c 'echo \"0 3 * * * root /opt/b.sh\" >> /etc/crontab'" \
+  $'ssh root@h \'cat > /etc/cron.d/backup\' <<\'EOF\'\n0 3 * * * root /opt/b.sh\nEOF' \
+  "sudo ln -s /opt/app/app.cron /etc/cron.d/app" \
+  "sudo cp backup.sh /etc/cron.daily/backup" \
+  "echo x | sudo tee -a /var/spool/cron/root" \
+  $'cat new.cron |\n  crontab' \
+  "find /tmp -name new.cron -exec crontab {} \\;" \
+  "sudo perl -pi -e 's/^0 3/0 4/' /etc/cron.d/backup" \
+  "printf 'x' | sudo dd of=/etc/cron.d/backup" \
+  "sudo sed -i 's/^1/2/' /etc/anacrontab" \
+  "docker exec app sh -c 'echo x >> /etc/crontabs/root'" \
+  "sudo certbot certonly --nginx -d x.kz" \
+  "acme.sh --issue -d x.kz"; do
+  n=$((n+1)); mk "$TMP/cronrw$n.jsonl" "Bash:$c"
+  check block "запись: ${c:0:60}" "$TMP/cronrw$n.jsonl"
+done
+
+echo "[2в] Историческая версия (до 25.09.2026) обязана ложно ловить просмотр — тест не слеп"
+# Без этой секции [1б] была бы зелёной и на сломанном замке, если бы случаи вдруг
+# перестали доходить до правила. Берём хук из истории git, а не из головы.
+OLD_HOOK="$TMP/old-guard.sh"
+if ( cd "$HERE" && MSYS_NO_PATHCONV=1 git show "25424f7:.claude/hooks/inventory-sync-guard.sh" ) > "$OLD_HOOK" 2>/dev/null \
+   && [ -s "$OLD_HOOK" ]; then
+  SAVED_HOOK="$HOOK"; HOOK="$OLD_HOOK"
+  mk "$TMP/hist1.jsonl" "Bash:sudo crontab -u root -l"
+  check block "старый замок останавливал на crontab -l (дефект виден)" "$TMP/hist1.jsonl"
+  # И обратная сторона: установку расписания в /etc/cron.d старый замок не видел —
+  # значит случай из [2б] ловит настоящую дыру, а не то, что и так ловилось.
+  mk "$TMP/hist2.jsonl" "Bash:ssh prod-host 'sudo $INSTALL_LINE'"
+  check pass "старый замок пропускал install в /etc/cron.d (дыра видна)" "$TMP/hist2.jsonl"
+  HOOK="$SAVED_HOOK"
+else
+  FAIL=$((FAIL+1)); echo "  ❌ потерян источник: нет 25424f7 (релиз 2.12.2) в истории"
+fi
+
+echo "[2г] Запись файлов в конфиги сервера — любым способом (с 25.09.2026)"
+# До этого замок видел запись через `>` и `install` только в файлы расписания. Среди случаев —
+# команды сессии 25.09.2026 (имена хостов обобщены), которые меняли сервер, а замок их бы не заметил.
+n=0
+for c in \
+  "echo 'server {}' > /etc/nginx/conf.d/a.conf" \
+  "sudo sh -c 'echo X=1 >> /opt/app/.env'" \
+  "cat new.service | sudo tee /etc/systemd/system/x.service >/dev/null" \
+  "ssh office-host 'sudo tee /opt/bots/compose/app/compose.yml >/dev/null' < compose.yml" \
+  "ssh prod-host 'sudo install -m 755 -o root -g root /tmp/new-x.sh /opt/infra/scripts/backup/x.sh'" \
+  "ssh office-host 'sudo install -d -o root -g root -m 755 /opt/bots/app'" \
+  "ssh prod-host 'sudo tee /etc/systemd/system/db-pull.timer >/dev/null' < t.timer" \
+  "sudo cp nginx.conf /etc/nginx/nginx.conf" \
+  "rsync -a ./site/ root@h:/var/www/site/" \
+  "scp app.env root@h:/opt/app/.env" \
+  "sudo sed -i 's/^#Port 22/Port 2222/' /etc/ssh/sshd_config" \
+  "sudo rm /etc/nginx/sites-enabled/default" \
+  "sudo mv /etc/nginx/sites-enabled/old /root/disabled/" \
+  "echo 'ssh-ed25519 AAAAC3Nz x' >> /root/.ssh/authorized_keys" \
+  "printf 'vm.swappiness=10\\n' | sudo dd of=/etc/sysctl.d/99-x.conf" \
+  "sudo perl -pi -e 's/old/new/' /etc/hosts" \
+  "bash scripts/bots/deploy-app.sh" \
+  "ssh office-host 'sudo /opt/bots/scripts/deploy-bot.sh'"; do
+  n=$((n+1)); mk "$TMP/cfgrw$n.jsonl" "Bash:$c"
+  check block "запись: ${c:0:60}" "$TMP/cfgrw$n.jsonl"
+done
+n=0
+for c in \
+  "ssh h 'cat /etc/nginx/nginx.conf' > ./nginx.conf" \
+  "sudo cp /etc/nginx/nginx.conf /etc/nginx/nginx.conf.bak" \
+  "scp root@h:/etc/nginx/nginx.conf /tmp/" \
+  "docker cp app:/etc/nginx/nginx.conf ./" \
+  "sudo apt install -y sqlite3" \
+  "pip install -r /opt/app/requirements.txt" \
+  "git mv docs/a.md docs/b.md" \
+  "echo x > /tmp/out.txt" \
+  "sudo journalctl -u nginx > /tmp/nginx-journal.txt" \
+  "grep -r listen /etc/nginx/ > /tmp/listen.txt" \
+  "ssh h 'sudo sqlite3 /var/lib/app/db.sqlite \".backup /tmp/x.db\"'" \
+  "sudo rm -f /opt/app/cache/x.tmp" \
+  "sed -n '1,20p' /etc/ssh/sshd_config" \
+  "ssh prod-host 'sudo cp -p /etc/cron.d/backup /root/cron.d-backup.bak-2026-09-25'" \
+  "git show HEAD:x.sh | ssh prod-host 'cat > /tmp/new-x.sh'"; do
+  n=$((n+1)); mk "$TMP/cfgro$n.jsonl" "Bash:$c"
+  check pass "не правка: ${c:0:60}" "$TMP/cfgro$n.jsonl"
+done
+
+echo "[2д] Формы второго раунда независимой проверки (кавычки, cd, обёртки, флаги) — 25.09.2026"
+# `|` и `;` внутри кавычек-данных больше не режут команду: правка sed с разделителем `|` и
+# директивы nginx с `;` раньше проходили молча. Относительный путь после `cd /abs` понимается.
+n=0
+for c in \
+  "ssh prod-host \"sudo sed -i 's|proxy_pass http://127.0.0.1:3000|proxy_pass http://127.0.0.1:4000|' /etc/nginx/sites-available/site\"" \
+  "ssh prod-host 'sudo sed -i \"s/listen 80;/listen 8080;/\" /etc/nginx/sites-available/default'" \
+  "sudo sed -i 's/^PermitRootLogin yes/PermitRootLogin no # hardening/' /etc/ssh/sshd_config" \
+  "ssh prod-host 'cd /opt/app && echo \"LOG_LEVEL=debug\" >> .env'" \
+  "ssh prod-host 'sudo -u deploy bash -c \"cd /opt/site && git fetch && git reset --hard origin/main\"'" \
+  "ssh prod-host 'sudo /opt/app/redeploy.sh'" \
+  "ssh prod-host 'sudo /opt/bots/bot_deploy.sh'" \
+  "ssh prod-host 'sudo /usr/local/sbin/deploy-run site'" \
+  "ssh prod-host '\\cp -f /opt/infra/cron/backup /etc/cron.d/backup'" \
+  "sudo -u git cp /tmp/mirror.cron /etc/cron.d/mirror" \
+  "sudo bash -c '/opt/x/gen-cron.sh &>> /etc/cron.d/gen'" \
+  "ssh prod-host 'sudo mv -t /root/cron-off/ /etc/cron.d/backup-old'" \
+  "ssh prod-host 'sudo mv /etc/systemd/system/x.service /etc/systemd/system/x.service.bak'" \
+  "ssh prod-host \"sudo find /tmp/conf -name '*.conf' -exec cp {} /etc/nginx/conf.d/ \\;\"" \
+  "ssh prod-host 'sudo install /tmp/app.service /etc/systemd/system/app.service -m 644'" \
+  "sudo wget -qO /etc/logrotate.d/app https://example.org/x" \
+  "ssh prod-host 'echo \"ssh-ed25519 AAAA x\" >> ~/.ssh/authorized_keys'" \
+  "ssh-copy-id -i ~/.ssh/id_ed25519.pub deploy@prod-host" \
+  "ssh prod-host 'sudo touch /etc/deploy-hook/DISABLED'" \
+  "ssh prod-host 'sudo htpasswd -bc /etc/nginx/.htpasswd admin x'" \
+  "ssh prod-host 'sudo ufw default deny incoming'" \
+  "ssh prod-host 'sudo usermod -aG docker deploy'" \
+  "ssh prod-host 'sudo tar -xzf /tmp/nginx-conf.tgz -C /etc/nginx'" \
+  "scp .env root@prod-host:/root/app-bot/.env" \
+  "ssh prod-host 'sudo x-ui restart'"; do
+  n=$((n+1)); mk "$TMP/r2rw$n.jsonl" "Bash:$c"
+  check block "запись: ${c:0:60}" "$TMP/r2rw$n.jsonl"
+done
+n=0
+for c in \
+  "git -C /c/Users/me/Projects/infra diff scripts/bots/deploy-app.sh" \
+  "git add scripts/bots/deploy-app.sh" \
+  "ssh prod-host 'cat /opt/infra/scripts/deploy-app.sh'" \
+  "bash -n scripts/bots/deploy-app.sh" \
+  "sudo cp /etc/nginx/sites-available/site.conf{,.bak}" \
+  "cp /etc/nginx/nginx.conf /etc/nginx/nginx.conf.2026-09-25" \
+  "cp -a /etc/nginx /etc/nginx-backup-20260925" \
+  "rsync -avn ./nginx/ prod-host:/etc/nginx/" \
+  "ssh prod-host 'docker exec pg pg_dump -U app app > /opt/backups/app-2026-09-25.sql'" \
+  "crontab -l | ssh backup-host \"cat > /srv/snap/prod-host-root.cron\"" \
+  "ssh prod-host 'sudo rm -rf /root/.cache/pip'" \
+  "ssh prod-host 'pip -q install -r /opt/bot/requirements.txt'" \
+  "ssh prod-host 'sudo nginx -T 2>&1 | tee /tmp/nginx-T.txt'" \
+  "[ \"\$(crontab -l | wc -l)\" -gt 0 ] && echo yes" \
+  "ssh-keyscan example.kz >> ~/.ssh/known_hosts" \
+  "sed -n 's|listen 80;|X|p' /etc/nginx/sites-available/default" \
+  "sudo apt update" \
+  "yq '.services' /opt/app/docker-compose.yml" \
+  "ssh prod-host 'sudo sqlite3 /etc/x-ui/x-ui.db \"SELECT * FROM settings\"'" \
+  "ssh prod-host 'sudo tar -czf /tmp/etc.tgz /etc/nginx'"; do
+  n=$((n+1)); mk "$TMP/r2ro$n.jsonl" "Bash:$c"
+  check pass "не правка: ${c:0:60}" "$TMP/r2ro$n.jsonl"
+done
+
+echo "[2е] Текст с командой внутри — останавливает: цена правила 4 (решение оператора 25.07.2026)"
+# Первая версия PR #19 выкидывала тело heredoc «у известного читателя» и не останавливала на
+# тексте коммита с `ufw default`. Проверка мейнтейнера 26.09.2026: то же исключение пропускало
+# настоящие правки (`while read c; do ssh h "$c"; done <<EOF`, `bash /dev/stdin <<EOF`, записал
+# скрипт и выполнил). Замки не отличают упоминание от исполнения намеренно: лишняя остановка —
+# одна реплика «инфраструктура не менялась», пропуск — разошедшийся inventory. Эти случаи
+# краснеют, если исключение «это же текст» вернут.
+n=0
+for c in \
+  $'git commit -q -F - <<\'EOF\'\nfix: ufw default deny, systemctl edit x, git pull в /opt/app\nsudo cp x /etc/nginx/nginx.conf\nEOF' \
+  $'cat > /tmp/notes.md <<\'EOF\'\nsudo systemctl restart nginx\necho X >> /opt/app/.env\nEOF' \
+  $'gh pr create --title x --body-file - <<\'EOF\'\n- ufw enable, hostnamectl set-hostname, useradd deploy\nEOF' \
+  $'cat > run.sh <<\'EOF\'\n#!/usr/bin/env bash\ndocker compose up -d\nEOF' \
+  $'python - <<\'PY\'\nprint("mv /etc/x /root/y")\nPY'; do
+  n=$((n+1)); mk "$TMP/hdro$n.jsonl" "Bash:$c"
+  check block "текст с командой: ${c:0:50}" "$TMP/hdro$n.jsonl"
+done
+n=0
+for c in \
+  $'ssh prod-host <<\'EOF\'\nsudo systemctl restart nginx\nEOF' \
+  $'ssh prod-host \'bash -s\' <<\'EOF\'\nsudo cp /tmp/x.conf /etc/nginx/nginx.conf\nEOF' \
+  $'bash <<\'EOF\'\nsudo ufw default deny incoming\nEOF' \
+  $'ssh prod-host sudo -s <<\'EOF\'\necho X=1 >> /opt/app/.env\nEOF' \
+  $'sudo tee /etc/systemd/system/x.service > /dev/null <<\'EOF\'\n[Service]\nEOF' \
+  $'git commit -q -m x <<\'EOF\'\nтекст\nEOF\nsudo systemctl restart nginx' \
+  $'grep -n "<<\'PY\'" hook.sh\nssh prod \'sudo systemctl restart nginx\'' \
+  $'# запись через cat <<EOF, см. ниже\nssh prod \'sudo systemctl restart nginx\'' \
+  $'ssh -o ConnectTimeout=5 \\\n    root@prod <<\'EOF\'\nsudo systemctl restart nginx\nEOF' \
+  $'cat <<\'EOF\' | ssh prod \'sudo bash -s\'\nsystemctl restart nginx\nEOF' \
+  $'timeout 120 ssh prod \'bash -s\' <<\'EOF\'\nsudo systemctl restart nginx\nEOF' \
+  $'sudo -iu root bash <<\'EOF\'\nsystemctl restart nginx\nEOF' \
+  $'git commit -q -m "$(cat <<\'EOF\'\nfix: x\nEOF\n)" && ssh prod \'cd /opt/app && git pull\'' \
+  $'/usr/bin/ssh prod <<\'EOF\'\nsudo systemctl restart nginx\nEOF' \
+  $'expect <<\'EOF\'\nsudo systemctl restart nginx\nEOF' \
+  $'bash -c "$(cat <<\'EOF\'\nsystemctl restart nginx\nEOF\n)"'; do
+  n=$((n+1)); mk "$TMP/hdrw$n.jsonl" "Bash:$c"
+  check block "тело — команды или запись: ${c:0:45}" "$TMP/hdrw$n.jsonl"
+done
+n=0
+for c in \
+  $'git commit -q \\\n  -F - <<\'EOF\'\nfix: ufw default deny\nEOF' \
+  $'MSG=$(cat <<\'EOF\'\nfix: systemctl restart nginx\nEOF\n)' \
+  $'cat > /tmp/fix.sh <<\\EOF\nsudo systemctl restart nginx\nEOF' \
+  $'ssh prod \'bash -s\' <<\'OUTER\'\ncat > /tmp/note <<\'EOF\'\nsystemctl restart nginx\nEOF\nOUTER' \
+  $'bash ./configure-answers.sh <<\'EOF\'\nsudo systemctl restart nginx\nEOF' \
+  $'ssh prod \'cat > /tmp/note.txt\' <<\'EOF\'\nsudo systemctl restart nginx\nEOF' \
+  $'ssh prod "sudo -u postgres psql app" <<\'SQL\'\n-- systemctl restart nginx\nSELECT 1;\nSQL' \
+  $'jq -r \'.[] | .name\' <<\'EOF\'\n[{"name":"sudo systemctl restart nginx"}]\nEOF' \
+  $'docker compose exec -T db psql -U app <<\'SQL\'\n-- systemctl restart nginx\nSQL' \
+  $'gh pr create --title "fix(hooks): x" \\\n  --body-file - <<\'EOF\'\n- ufw default deny incoming\nEOF' \
+  $'PYTHONIOENCODING=utf-8 python - "$(cygpath -m x.py)" <<\'PYEOF\'\nprint("mv /etc/x /root/y")\nPYEOF'; do
+  n=$((n+1)); mk "$TMP/hdro2$n.jsonl" "Bash:$c"
+  check block "текст с командой (формы): ${c:0:40}" "$TMP/hdro2$n.jsonl"
+done
+
+echo "[2ж] Не хуже старого: что ловил хук до 25.09.2026, ловится и сейчас (проверка 26.09.2026)"
+# Первая версия PR #19 закрыла много дыр — и незаметно открыла 17 новых: правила стали точнее,
+# а старое грубое правило ловило эти формы, пусть и случайно (правило 3а свода замков). Каждый
+# случай проверяется парой: хук из истории git (25424f7) обязан остановить — иначе случай ничего
+# не доказывает, — и нынешний тоже. Первая строка берётся из скилла rotate-secrets, не из головы.
+SKILL_ACME="$(sed -n "s/^[[:space:]]*\(ssh .*acme\.sh --renew.*\)\$/\1/p" "$HERE/../skills/rotate-secrets/SKILL.md" | head -1)"
+if [ -z "$SKILL_ACME" ]; then
+  FAIL=$((FAIL+1)); echo "  ❌ потерян источник: в rotate-secrets/SKILL.md нет строки ssh … acme.sh --renew"
+fi
+n=0
+for c in \
+  "$SKILL_ACME" \
+  $'ssh prod \'/root/.acme.sh/acme.sh --issue -d x.kz --standalone\'' \
+  $'ssh prod \'sudo /usr/bin/certbot renew --force-renewal\'' \
+  $'ssh prod \'sudo nginx -t\ngrep -n listen /etc/nginx/nginx.conf\' && ssh prod \'sudo systemctl reload nginx\'' \
+  $'for h in a b; do ssh $h \'sudo /opt/infra/deploy.sh\'; done' \
+  $'if ./scripts/deploy.sh prod; then echo ok; fi' \
+  $'{ ./scripts/deploy.sh prod; } 2>&1 | tee /tmp/deploy.log' \
+  $'ssh prod bash -s production < scripts/deploy.sh' \
+  $'! ./update.sh || echo fail' \
+  $'ssh "$H" \'curl -fsS localhost/health; echo x | sudo tee /etc/nginx/conf.d/a.conf\'' \
+  $'ssh prod -t \'curl -s localhost; echo x | sudo tee /etc/nginx/conf.d/a.conf\'' \
+  $'ssh prod echo "start; sudo systemctl restart nginx"' \
+  $'cat > /tmp/fix.sh <<\'EOF\'\nsudo cp /tmp/x.conf /etc/nginx/nginx.conf\nsudo systemctl reload nginx\nEOF\nscp /tmp/fix.sh prod:/tmp/ && ssh prod \'bash /tmp/fix.sh\'' \
+  $'ssh prod \'cat > /tmp/f.sh && sudo bash /tmp/f.sh\' <<\'EOF\'\nsystemctl restart nginx\nEOF' \
+  $'while read -r c; do ssh prod "$c"; done <<\'EOF\'\nsudo systemctl restart nginx\nEOF' \
+  $'bash /dev/stdin prod <<\'EOF\'\nssh prod \'sudo systemctl restart nginx\'\nEOF' \
+  $'ssh prod \'sudo bash /dev/stdin\' <<\'EOF\'\nsystemctl restart nginx\nEOF'; do
+  [ -n "$c" ] || continue
+  n=$((n+1))
+  if [ -s "$OLD_HOOK" ]; then
+    # Отдельные транскрипты: метка «один блок на ход» опознаёт ход по имени файла.
+    mk "$TMP/nw-old$n.jsonl" "Bash:$c"
+    SAVED_HOOK="$HOOK"; HOOK="$OLD_HOOK"
+    check block "старый ловил: ${c:0:55}" "$TMP/nw-old$n.jsonl"
+    HOOK="$SAVED_HOOK"
+  fi
+  mk "$TMP/nw$n.jsonl" "Bash:$c"
+  check block "и нынешний ловит: ${c:0:50}" "$TMP/nw$n.jsonl"
+done
+
+echo "[2з] Длинная команда разбирается за линейное время (26.09.2026)"
+# Разбор кавычек склеивал весь буфер на каждой кавычке: 8000 пар — 5,4 с, 20000 — 125 с при
+# таймауте хука 20 с, и хук молча пропускал. Здесь 16000 пар и правка в конце: исправный
+# разбор укладывается в доли секунды, квадратичный не уложится в 5 с и на быстрой машине.
+LONG="$(python3 -c 'print(" ".join(["echo \"a\" \"b\""] * 8000) + "; sudo systemctl restart nginx")')"
+mk "$TMP/long.jsonl" "Bash:$LONG"
+LONG_V="$(python3 - "$TMP/long.jsonl" "$HOOK" "$MARKS" <<'PY'
+import json, os, subprocess, sys
+tr, hook, marks = sys.argv[1:4]
+inp = json.dumps({"session_id": "long", "cwd": "/tmp/p", "transcript_path": tr, "stop_hook_active": False})
+try:
+    r = subprocess.run(["bash", hook], input=inp, capture_output=True, text=True, timeout=5,
+                       env=dict(os.environ, TMPDIR=marks, PYTHONIOENCODING="utf-8"))
+    print("block" if '"decision": "block"' in r.stdout else "pass")
+except subprocess.TimeoutExpired:
+    print("timeout")
+PY
+)"
+if [ "$LONG_V" = "block" ]; then PASS=$((PASS+1)); echo "  ✅ 16000 пар кавычек — разобрано за 5 с, правка найдена"
+else FAIL=$((FAIL+1)); echo "  ❌ 16000 пар кавычек: ${LONG_V:-пусто} — разбор не линейный или правка потеряна"; fi
+
+echo "[2и] Старые дыры: не видел и хук до 25.09.2026 (проверка 26.09.2026)"
+# Каждый случай парой: старый хук пропускал (дыра настоящая), нынешний останавливает. Формы —
+# из скиллов (migrate-server-to-server: `docker compose -f … up -d`; setup-vpn-panel: sqlite3 x-ui.db).
+n=0
+for c in \
+  $'ssh prod \'cd /opt/app && docker-compose up -d\'' \
+  $'ssh old \'docker compose -f /opt/bot1/docker-compose.yml up -d\'' \
+  $'ssh prod \'docker run -d --name uptime --restart unless-stopped -p 127.0.0.1:3001:3001 louislam/uptime-kuma\'' \
+  $'ssh prod \'sudo git clone https://github.com/x/y /opt/newapp\'' \
+  $'ssh prod \'echo x >| /etc/nginx/conf.d/a.conf\'' \
+  $'ssh prod \'sudo install -m 755 /tmp/run.sh /opt/infra/backup/run-backup.sh\'' \
+  $'ssh prod \'sudo sqlite3 /etc/x-ui/x-ui.db\' <<\'SQL\'\nUPDATE settings SET value=\'2053\' WHERE key=\'webPort\';\nSQL' \
+  $'echo "UPDATE settings SET value=\'2053\' WHERE key=\'webPort\';" | ssh prod \'sudo sqlite3 /etc/x-ui/x-ui.db\''; do
+  n=$((n+1))
+  if [ -s "$OLD_HOOK" ]; then
+    mk "$TMP/od-old$n.jsonl" "Bash:$c"
+    SAVED_HOOK="$HOOK"; HOOK="$OLD_HOOK"
+    check pass "старый пропускал: ${c:0:55}" "$TMP/od-old$n.jsonl"
+    HOOK="$SAVED_HOOK"
+  fi
+  mk "$TMP/od$n.jsonl" "Bash:$c"
+  check block "нынешний ловит: ${c:0:55}" "$TMP/od$n.jsonl"
+done
+n=0
+for c in \
+  "cp .env.example /Users/me/Projects/app/.env" \
+  "docker run --rm alpine echo hi" \
+  "ssh prod 'docker compose -f /opt/app/compose.yml logs -f app'" \
+  "ssh prod 'docker compose -f /opt/app/compose.yml ps'" \
+  "git clone https://github.com/x/y /tmp/y" \
+  "echo 'SELECT * FROM settings;' | ssh prod 'sudo sqlite3 /etc/x-ui/x-ui.db'" \
+  "ssh prod 'pg_dump app > /opt/app/backups/app-2026-09-26.sql'" \
+  "ssh prod 'sudo cp /etc/nginx/nginx.conf /opt/backups/nginx.conf'" \
+  "ssh prod 'sudo cp /etc/cron.d/backup /opt/app/backup/root.cron'"; do
+  n=$((n+1)); mk "$TMP/odro$n.jsonl" "Bash:$c"
+  check pass "не правка: ${c:0:60}" "$TMP/odro$n.jsonl"
+done
+
 echo "[2] Изменение без обновления inventory — останавливаем"
 mk "$TMP/change1.jsonl" "Bash:ssh prod-host 'docker compose up -d academii'"
 check block "docker compose up" "$TMP/change1.jsonl"
@@ -92,6 +483,28 @@ mk "$TMP/wrap5.jsonl" "Bash:grep -n 'deploy.sh' README.md"
 check pass "grep со словом deploy.sh" "$TMP/wrap5.jsonl"
 mk "$TMP/wrap6.jsonl" "Bash:cat scripts/deploy/deploy-remote.sh"
 check pass "чтение самого скрипта выкатки" "$TMP/wrap6.jsonl"
+# Сужение 26.09.2026: слово deploy/update у проверок и тестов — не выкатка. Первые два случая —
+# дословно ложные остановки той сессии (агент гонял у себя тесты хука проверки обновлений).
+# Каждому случаю — свой транскрипт: метка «одна остановка за ход» привязана к его имени.
+n=0
+for c in \
+  "bash brain-update-check.sh --status </dev/null" \
+  "bash .claude/hooks/tests/test-brain-update-check.sh 2>&1" \
+  "./scripts/check-updates.sh" \
+  "ssh prod-host 'sudo /usr/local/sbin/update-status'" \
+  "bash scripts/deploy-dry-run.sh" \
+  "./test_deploy.sh"; do
+  n=$((n+1)); mk "$TMP/wrapok$n.jsonl" "Bash:$c"; check pass "проверка, не выкатка: $c" "$TMP/wrapok$n.jsonl"
+done
+# Контроль: настоящие обёртки с теми же словами по-прежнему останавливают.
+for c in \
+  "./update-certs.sh" \
+  "ssh prod-host 'sudo /opt/app/self_update.sh'" \
+  "ssh prod-host 'sudo /usr/local/sbin/deploy-run site'" \
+  "bash scripts/deploy-app.sh" \
+  "ssh prod-host 'cd /opt/bot && ./redeploy.sh'"; do
+  n=$((n+1)); mk "$TMP/wrapbad$n.jsonl" "Bash:$c"; check block "обёртка выкатки: $c" "$TMP/wrapbad$n.jsonl"
+done
 
 echo "[3] Изменение + обновление inventory — пропускаем"
 mk "$TMP/ok1.jsonl" "Bash:ssh prod-host 'docker compose up -d'" "Edit:/infra/inventory/hosts/prod-host/services.md"
@@ -100,6 +513,28 @@ mk "$TMP/ok2.jsonl" "Bash:ssh prod-host 'systemctl restart nginx'" "Bash:ssh pro
 check pass "пересборка снимка/дашборда" "$TMP/ok2.jsonl"
 mk "$TMP/ok3.jsonl" "Bash:ssh prod-host 'docker compose up -d'" "Bash:bash scripts/dump-snapshot.sh prod-host"
 check pass "пересъёмка снимка" "$TMP/ok3.jsonl"
+mk "$TMP/ok4.jsonl" "Bash:ssh prod-host 'systemctl restart nginx'" \
+   $'Bash:cat >> ../infra/inventory/hosts/prod-host/services.md <<\'EOF\'\n- nginx перезапущен\nEOF'
+check pass "запись в inventory командой" "$TMP/ok4.jsonl"
+
+echo "[3а] Чтение inventory обновлением не считается (проверка 26.09.2026)"
+# Раньше любое упоминание `inventory/` в команде засчитывалось как обновление: `cat` справки
+# рядом с правкой сервера выключал сторож на весь ход.
+n=0
+for c in \
+  "cat ../infra/inventory/README.md; ssh prod 'sudo systemctl restart nginx'" \
+  "grep -rn nginx ../infra/inventory/ && ssh prod 'sudo systemctl reload nginx'" \
+  "git -C ../infra diff inventory/ && ssh prod 'docker compose up -d'" \
+  "sed -n '1,40p' ../infra/inventory/hosts/prod/services.md; ssh prod 'sudo ufw allow 8443'"; do
+  n=$((n+1)); mk "$TMP/invro$n.jsonl" "Bash:$c"
+  check block "чтение + правка: ${c:0:55}" "$TMP/invro$n.jsonl"
+done
+if [ -s "$OLD_HOOK" ]; then
+  mk "$TMP/invro-old.jsonl" "Bash:cat ../infra/inventory/README.md; ssh prod 'sudo systemctl restart nginx'"
+  SAVED_HOOK="$HOOK"; HOOK="$OLD_HOOK"
+  check pass "старый хук молчал на «чтение + правка» (дыра видна)" "$TMP/invro-old.jsonl"
+  HOOK="$SAVED_HOOK"
+fi
 
 echo "[4] Защита от зацикливания"
 mk "$TMP/loop.jsonl" "Bash:ssh prod-host 'docker compose restart api'"
@@ -136,6 +571,102 @@ else
   FAIL=$((FAIL+1)); echo "  ❌ причина при cp1252 пуста или искажена"
 fi
 unset HOOK_ENC
+
+echo "[7] Сторож укладывается в своё время сам (ADR-0043, правило 3ж)"
+# Хук, оборванный движком по таймауту, заканчивает ответ без проверки — молча, как будто
+# проверка прошла. Сторож обязан успеть сам: свой бюджет меньше таймаута движка, не успел —
+# один раз останавливает ответ с просьбой проверить самому.
+ok7()  { PASS=$((PASS+1)); printf '  ✅ %s\n' "$1"; }
+bad7() { FAIL=$((FAIL+1)); printf '  ❌ %s\n' "$1"; }
+G_BUDGET="$(grep -Eo '^BUDGET = [0-9]+' "$HOOK" | grep -Eo '[0-9]+$')"
+G_ENGINE="$(python3 - "$HERE/../settings.json" <<'PY' 2>/dev/null
+import json, sys
+d = json.load(open(sys.argv[1], encoding="utf-8"))
+for m in d.get("hooks", {}).get("Stop", []):
+    for h in m.get("hooks", []):
+        if "inventory-sync-guard.sh" in h.get("command", ""):
+            print(h.get("timeout", 60))
+PY
+)"
+if [ -z "$G_BUDGET" ] || [ -z "$G_ENGINE" ]; then
+  bad7 "не прочитал бюджет сторожа (${G_BUDGET:-нет}) или таймаут движка (${G_ENGINE:-нет})"
+elif [ "$G_ENGINE" -gt $((G_BUDGET + 3)) ]; then
+  ok7 "бюджет ${G_BUDGET} с с запасом меньше таймаута движка ${G_ENGINE} с"
+else
+  bad7 "бюджет ${G_BUDGET} с не оставляет запаса до таймаута движка ${G_ENGINE} с"
+fi
+# Бюджет навязан подопечному через env (правило 3д) и сведён к нулю: ход БЕЗ изменений,
+# то есть остановка может прийти только из ветки «не успел».
+GUARD_BUDGET_ENV=0
+mk "$TMP/budget.jsonl" "Bash:docker ps -a"
+B_OUT="$(run "$TMP/budget.jsonl" 2>/dev/null)"
+if grep -q '"decision": *"block"' <<<"$B_OUT" && grep -q 'не успел' <<<"$B_OUT"; then
+  ok7 "бюджет исчерпан — ответ остановлен с «не успел», а не пропущен молча"
+else
+  bad7 "при исчерпанном бюджете сторож не остановил ответ: ${B_OUT:0:120}"
+fi
+B_OUT="$(run "$TMP/budget.jsonl" 2>/dev/null)"
+if grep -q '"decision": *"block"' <<<"$B_OUT"; then bad7 "второй раз в том же ходе снова остановил — зацикливание"
+else ok7 "второй раз в том же ходе — пропускает (не больше одной остановки)"; fi
+unset GUARD_BUDGET_ENV
+G_CODE="$(grep -v '^[[:space:]]*#' "$HOOK")"
+if grep -qF '0 <= _b < BUDGET' <<<"$G_CODE"; then ok7 "переменная окружения может бюджет только уменьшить"
+else bad7 "не нашёл ограничения «только уменьшить» для INV_GUARD_BUDGET"; fi
+
+echo "[8] Бюджет покрывает весь сторож, а не только python-часть (ADR-0044, дополнение 2026-10-06)"
+# Дефект: бюджет считала python-часть от СВОЕГО старта, а запуск python3 и `cat` не считал
+# никто. На Windows python3 — часто заглушка Microsoft Store, под нагрузкой её запуск тянется
+# десятки секунд (03.10.2026 замок красной зоны так шёл 36,5 с). Медленный запуск
+# подстраиваем подставным python3 только в PATH сторожа (правило 3д), бюджет — 2 с. Время —
+# по захвату stdout И stderr: висящий хвост проверки не должен держать трубы движка.
+now_ms() {   # часы без процессов и без GNU date (`date +%s%N` на macOS печатает N)
+  if [ -n "${EPOCHREALTIME:-}" ]; then local t="${EPOCHREALTIME/[.,]/}"; NOW_MS=$(( 10#$t / 1000 ))
+  else NOW_MS=$(( SECONDS * 1000 )); fi
+}
+MEDL="$TMP/medlennyj"; mkdir -p "$MEDL"
+printf '#!/usr/bin/env bash\nsleep 8\nexit 1\n' > "$MEDL/python3"; chmod +x "$MEDL/python3"
+mk "$TMP/medl.jsonl" "Bash:ssh prod-host 'docker compose up -d api'"
+# Порядок важен: после продолжения (stop_hook_active сбрасывает метку) нехватка времени
+# снова останавливает — значит, сброс работает; повтор без продолжения — пропуск.
+for spec in "block|медленный python3 — «не успел»|false|не успел" \
+            "pass|продолжение после остановки (stop_hook_active) — пропуск|true|" \
+            "block|после продолжения нехватка времени снова останавливает|false|не успел" \
+            "pass|тот же ход ещё раз без продолжения — пропуск (не больше одной остановки)|false|"; do
+  want="${spec%%|*}"; rest="${spec#*|}"; desc="${rest%%|*}"; rest="${rest#*|}"; act="${rest%%|*}"; slovo="${rest#*|}"
+  now_ms; s=$NOW_MS
+  OUT="$(HOOK_PATH="$MEDL:$PATH" GUARD_BUDGET_ENV=2 run "$TMP/medl.jsonl" "$act" 2>&1)"
+  now_ms; ms=$(( NOW_MS - s ))
+  got="pass"; grep -q '"decision": *"block"' <<<"$OUT" && got="block"
+  if [ "$got" = "$want" ] && [ "$ms" -lt 4000 ] && { [ -z "$slovo" ] || grep -q "$slovo" <<<"$OUT"; }; then
+    ok7 "${desc} — ${got}, ${ms} мс"
+  else
+    bad7 "${desc} — ожидали ${want} быстрее 4 с, получили ${got} за ${ms} мс${OUT:+: ${OUT:0:90}}"
+  fi
+done
+# Сломанный python3 — то же, что его нет: fail-open по решению ADR-0023 (дисциплинарная
+# проверка не мешает работе). Это постоянное свойство машины, а не сбой одного ответа.
+SLOM="$TMP/slomannyj"; mkdir -p "$SLOM"
+printf '#!/usr/bin/env bash\necho "Python was not found; run without arguments to install from the Microsoft Store" >&2\nexit 9009\n' > "$SLOM/python3"
+chmod +x "$SLOM/python3"
+mk "$TMP/slom.jsonl" "Bash:ssh prod-host 'docker compose up -d api'"
+OUT="$(HOOK_PATH="$SLOM:$PATH" run "$TMP/slom.jsonl" 2>&1)"
+if grep -q '"decision": *"block"' <<<"$OUT"; then bad7 "сломанный python3 — остановил ответ, а политика сторожа — пропуск"
+else ok7 "сломанный python3 — пропуск, как при отсутствии python3 (fail-open)"; fi
+# Переносимость сторожа времени (правило 3г: поведение другой версии bash здесь не
+# воспроизвести — проверяем текст): на bash 3.2 `$!` после `<( )` не задан, под `set -u`
+# голое `$!` обрывает хук; код `read -t` по таймауту (>128) есть только с bash 4.0.
+STRAZH="$(sed -n '/^# ── Сторож времени/,$p' "$HOOK" | grep -v '^[[:space:]]*#')"
+if [ -z "$STRAZH" ]; then bad7 "сторож времени не найден по маркеру — проверять нечего"
+else
+  if grep -Eq '=\$!([^:]|$)' <<<"$STRAZH"; then bad7 "номер фоновой проверки — голым \$! (bash < 4.4 упадёт)"
+  else ok7 "номер фоновой проверки — \${!:-}"; fi
+  if grep -Eq '\$\?[[:space:]]*>[[:space:]]*128' <<<"$STRAZH" || ! grep -q 'KONETS_PROVERKI' <<<"$STRAZH"; then
+    bad7 "завершение проверки узнаётся не по метке конца"
+  else ok7 "завершение проверки — по метке конца, а не по коду read"; fi
+fi
+H_BUDGET="$(grep -Eo '^HOOK_BUDGET=[0-9]+' "$HOOK" | cut -d= -f2)"
+if [ -n "$H_BUDGET" ] && [ "$H_BUDGET" = "$G_BUDGET" ]; then ok7 "бюджет обвязки = бюджет python-части (${H_BUDGET} с)"
+else bad7 "бюджет обвязки (${H_BUDGET:-нет}) не совпадает с python-частью (${G_BUDGET:-нет})"; fi
 
 echo "─────────────────────────────────────────────────────────"
 printf 'Итог: %d прошло, %d провалено\n' "$PASS" "$FAIL"

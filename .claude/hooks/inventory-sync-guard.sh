@@ -17,9 +17,47 @@
 #      поля из п.1 не будет. Второй механизм полностью под нашим контролем, поэтому
 #      бесконечный цикл «блок → ответ → блок» невозможен.
 #
+# НЕ УСПЕЛ — НЕ ТО ЖЕ, ЧТО «НЕПОНЯТНО» (ADR-0043). Проверка длиннее бюджета (15 с при
+# таймауте движка 20 с) — останавливаем один раз с просьбой проверить самому: оборванный
+# движком хук закончил бы ответ молча, как будто проверка прошла. С 06.10.2026 бюджет считает
+# сторож времени в конце файла — от старта хука, включая запуск python3 (ADR-0044, дополнение).
+#
 # FAIL-OPEN, в отличие от замка красной зоны. Здесь цена ошибки — расхождение документа,
 # а не потеря данных. Нет python3, нет транскрипта, что-то непонятно → молча пропускаем:
-# мешать работе ученика из-за дисциплинарной проверки неправильно.
+# мешать работе ученика из-за дисциплинарной проверки неправильно. Сломанный python3
+# (на Windows — заглушка Microsoft Store без Python, падает сразу) — то же, что его нет:
+# пропуск. Это постоянное свойство машины, а не сбой одного ответа — останавливать каждый
+# ответ из-за него значило бы мешать работе, ничего не проверив.
+#
+# ЧТО СЧИТАЕТСЯ ПРАВКОЙ (с 25.09.2026): команды управления (docker/systemctl/ufw/nginx/certbot,
+# пользователи, hostnamectl, x-ui), crontab кроме просмотра, запуск обёрток выкатки (имя со
+# словом deploy/update, кроме проверок и тестов — check/test/status в имени; служебные скрипты
+# в /usr/local/sbin), git, меняющий рабочую копию на
+# сервере, и ЗАПИСЬ ФАЙЛА в настройки сервера любым способом — `>`, tee, cp/install/rsync/scp,
+# sed -i, dd, tar -x, curl -o… — в /etc, /opt, /srv, /var/www, /usr/local, юниты systemd,
+# скрытые файлы root и пользователей, а `.env` и compose — в любом серверном каталоге.
+# НЕ правка: запись в /tmp, /var/lib, /var/log и на свой компьютер; копия-страховка рядом с
+# оригиналом (кроме каталогов *-enabled/, откуда грузится всё); дампы и бэкапы в /opt/backups.
+# Текст коммита, PR или файла, где написана такая команда, ОСТАНАВЛИВАЕТ — это цена правила 4
+# свода замков (решение оператора 25.07.2026). Команда читается дважды — точно и грубо, правкой
+# считается находка любого из чтений (см. changes_infra).
+#
+# ГРАНИЦА — чего замок НЕ видит (не расширять до паралича, см. правило 4 свода замков):
+#   - путь в переменной или цикле: `cp x "$CRON_D/y"`, `for f in /etc/cron.d/*; do sed -i …`
+#     — разбор не исполняет команду и значений переменных не знает (относительный путь после
+#     `cd /abs` — видит);
+#   - `chmod`/`chown`, `mkdir`, редакторы (`vim -c`, `ex`), `python -c "open(…,'w')"`, команды,
+#     переданные удалённому shell через echo (`echo "cp …" | ssh h bash`), `docker cp` в
+#     контейнер (это не сервер) — сознательно вне охвата;
+#   - слово-литерал внутри программы (`awk '$1=="crontab"'`) считается вызовом — цена правила 4;
+#   - скрытый файл в /root считается настройкой, даже если это выгрузка (`nginx -T > /root/.x`);
+#   - «записал, потом выполнил»: скрипт в файле или переменной, выполненный на сервере
+#     (`ssh h 'bash -s' < fix.sh`, `ssh h "$SCRIPT"`, `ssh h 'sudo bash /tmp/fix.sh'`), и код
+#     python, который сам ходит на сервер (subprocess, paramiko) — содержимого замок не знает.
+# Проверено двумя раундами независимой проверки 25.09.2026: расписание (343 случая) и запись
+# в настройки сервера (370 случаев, четыре атакующих и перепроверщика). Проверка мейнтейнера
+# 26.09.2026 прогнала старый и новый хук парой и нашла 17 правок, которые старый ловил, а
+# новый пропускал, — отсюда второе, грубое чтение и тест «не хуже старого».
 #
 # Ручная проверка: bash .claude/hooks/tests/test-inventory-sync-guard.sh
 
@@ -31,12 +69,50 @@ set -uo pipefail
 # как «разрешаю»: замок молча пропускает то, ради чего поставлен (поймано 26.08.2026,
 # 16 случаев теста из 16). Разбор — building-enforcement.md, правило «немой замок».
 export PYTHONIOENCODING=utf-8
-RAW="$(cat)"
+
+# Вход — встроенным read, а не `cat`: до сторожа времени (конец файла) ни одного процесса.
+# Вход Stop-хука маленький (сессия, путь транскрипта, флаг) — побайтное чтение не дорого.
+IFS= read -r -d '' RAW || true
+
+# Метка «не успел» — своя, без python: сессия из входа, файл во временном каталоге.
+SESSIYA=""
+[[ $RAW =~ \"session_id\"[[:space:]]*:[[:space:]]*\"([A-Za-z0-9_.-]{1,100})\" ]] && SESSIYA="${BASH_REMATCH[1]}"
+METKA_VREMYA="${TMPDIR:-/tmp}/sysadmin-inv-guard-vremya-${SESSIYA:-bez-sessii}"
+
+# Предохранитель 1 — ещё до python (его повторяет и python-часть): движок сообщает, что
+# Stop-хук уже отработал в этом ходе. Здесь же сбрасываем метку «не успел»: продолжение после
+# нашей остановки пришло, следующая нехватка времени в другом ходе снова остановит ответ.
+if [[ $RAW =~ \"stop_hook_active\"[[:space:]]*:[[:space:]]*true ]]; then
+  [ -f "$METKA_VREMYA" ] && { printf '0' > "$METKA_VREMYA"; } 2>/dev/null
+  exit 0
+fi
 
 command -v python3 >/dev/null 2>&1 || exit 0   # fail-open
 
+# Бюджет всего хука, с — меньше таймаута движка из settings.json (20 с). Тот же, что BUDGET
+# python-части; переменная окружения может его только уменьшить — для теста этой ветки.
+HOOK_BUDGET=15
+if [[ "${INV_GUARD_BUDGET:-}" =~ ^[0-9]+$ ]] && (( INV_GUARD_BUDGET < HOOK_BUDGET )); then
+  HOOK_BUDGET="$INV_GUARD_BUDGET"
+fi
+
+# ── ПРОВЕРКА: python-часть, исполняется в фоне под сторожем времени (конец файла) ──
+# В функции, а не прямо внутри `<( )`: bash 3.2 разбирает heredoc внутри `<( )` по скобкам,
+# а в этом коде их полно в регулярных выражениях.
+proverit() {
 python3 - "$RAW" <<'PY'
-import sys, json, os, re, hashlib, tempfile
+import sys, json, os, re, hashlib, tempfile, time
+
+T0 = time.monotonic()
+# Бюджет разбора, с — меньше таймаута движка из settings.json (20 с), см. vremya_vyshlo.
+# Переменная окружения может его только уменьшить — для теста этой ветки.
+BUDGET = 15
+try:
+    _b = int(os.environ.get("INV_GUARD_BUDGET", ""))
+    if 0 <= _b < BUDGET:
+        BUDGET = _b
+except ValueError:
+    pass
 
 try:
     d = json.loads(sys.argv[1])
@@ -98,54 +174,626 @@ for i, rec in enumerate(records):
         last_user_text = c if isinstance(c, str) else json.dumps(c, ensure_ascii=False)
 turn = records[start:]
 
+# ── Предохранитель 2: один блок на ход, даже без stop_hook_active ─────────────
+def ostanovit_odin_raz(reason):
+    """Остановить ответ с причиной — не больше одного раза за ход; иначе молча выйти."""
+    key = hashlib.sha256((str(d.get("session_id", "")) + last_user_text[:400]).encode()).hexdigest()[:16]
+    tmpdir = tempfile.gettempdir()
+    mark = os.path.join(tmpdir, f"sysadmin-inv-guard-{key}")
+    # Убираем за собой: метки старше двух суток (§3.10) — иначе TMPDIR копит мусор.
+    try:
+        cutoff = time.time() - 2 * 86400
+        for name in os.listdir(tmpdir):
+            if name.startswith("sysadmin-inv-guard-"):
+                p = os.path.join(tmpdir, name)
+                if os.path.getmtime(p) < cutoff:
+                    os.remove(p)
+    except Exception:
+        pass
+    if os.path.exists(mark):
+        sys.exit(0)
+    try:
+        open(mark, "w").close()
+    except Exception:
+        sys.exit(0)                  # не смогли поставить метку — лучше пропустить, чем зациклить
+    print(json.dumps({"decision": "block", "reason": reason}, ensure_ascii=False))
+    sys.exit(0)
+
+# ── Время — часть контракта (ADR-0043, правило 3ж свода замков) ───────────────
+# Хук, не уложившийся в таймаут движка (20 с), движок обрывает и заканчивает ответ без
+# проверки — молча. Поэтому свой бюджет меньше: не успели разобрать ход — это не
+# «непонятно» (там fail-open), а «не проверено». Останавливаем ответ ОДИН раз и просим
+# агента проверить самому: пропустить молча значило бы выдать непроверенное за чистое.
+def vremya_vyshlo():
+    if time.monotonic() - T0 <= BUDGET:
+        return
+    ostanovit_odin_raz(f"""§3.2 — сторож inventory не успел разобрать этот ответ за {BUDGET} с.
+
+Прерванный по таймауту хук движок читает как «проверено», поэтому говорю прямо: проверки
+не было. Посмотри сам, были ли в этом ответе команды, меняющие инфраструктуру. Если были —
+обнови соответствующий документ inventory; если нет — скажи оператору одной строкой, что
+обновлять нечего.
+
+Останавливаю только один раз за ответ: закончишь снова — пропущу.""")
+
+vremya_vyshlo()                      # чтение большого транскрипта — тоже время
+
 # ── Что в этом ходе делали ────────────────────────────────────────────────────
 # Меняющие инфраструктуру команды. Только глаголы изменения: read-only (ps/status/df)
 # сюда не попадает намеренно, иначе хук ругался бы на обычную диагностику.
-CHANGE_RE = re.compile(
-    r"docker\s+(compose\s+)?(up|down|restart|stop|start|rm|create|pull\s+.*&&)"
-    r"|docker\s+(network|volume)\s+(create|rm|connect|disconnect)"
-    r"|systemctl\s+(restart|start|stop|reload|enable|disable|daemon-reload)"
-    r"|nginx\s+-s\s+reload"
-    r"|(certbot|acme\.sh)\s+"
-    r"|ufw\s+(allow|deny|delete|limit)"
-    r"|crontab\s+"
-    r"|ln\s+-s.*sites-enabled"
-    r"|(tee|sed\s+-i)\s+.*(nginx|compose|\.env|\.conf|crontab)"
-    # Скрипты-обёртки выкатки. Ожог 2026-08-04: перечислялись только ПРЯМЫЕ команды, а
-    # весь IaC-контур устроен обёрткой — настоящие `git pull` и `docker compose up -d`
-    # живут ВНУТРИ скрипта на сервере, в ход попадает только его вызов. Класс операций,
-    # ради которых замок и ставился, проходил мимо: выкатка пересоздала контейнер, ответ
-    # закончился словами «инфраструктуру это не меняло», замок промолчал, отставание
-    # снимка заметил оператор. При этом на безобидное `crontab -l` замок срабатывал.
-    # Голого имени достаточно: read-only обёртки (`cat`, `grep`) отсеяны выше в
-    # READONLY_LEAD, а ложное срабатывание на упоминании — осознанная цена (правило 4
-    # в knowledge/agent-runtime/_reference/building-enforcement.md).
-    r"|deploy(-remote)?\.sh"
-    r"|update\.sh",
-    re.IGNORECASE)
+# Файлы и каталоги расписания cron — для старого правила sed/perl по «опасным словам».
+CRON_PATH = (r"/etc/cron\.(d|daily|hourly|weekly|monthly)(/|(?![\w.-]))"
+             r"|/etc/(ana)?crontab(?![\w.-])|/etc/crontabs/|/var/spool/cron/")
 
-INVENTORY_RE = re.compile(r"inventory[/\\]|/infra/.*\.md$|refresh\.sh|dump-snapshot", re.IGNORECASE)
+CHANGE_RE = re.compile("".join([
+    # Флаги перед глаголом (`docker compose -f /opt/x/compose.yml up -d` — форма из скилла
+    # migrate-server-to-server) и compose первой версии (`docker-compose up`) раньше проходили.
+    r"(docker\s+compose|docker-compose|docker)\s+((-f|--file|-p|--project-name|--profile|--env-file"
+    r"|--project-directory|--context|-c)\s+\S+\s+|--?[\w-]+\s+)*(up|down|restart|stop|start|rm|create|pull\s+.*&&)",
+    # Новый постоянный контейнер: `docker run -d`, `--restart`. Разовый `docker run --rm …` — не правка.
+    r"|docker\s+(container\s+)?run\s(.*\s)?(-[a-zA-Z]*d[a-zA-Z]*|--detach|--restart(=\S+)?)(\s|$)",
+    r"|docker\s+(network|volume)\s+(create|rm|connect|disconnect)",
+    r"|systemctl\s+(-\S+\s+)*(restart|start|stop|reload|enable|disable|daemon-reload|edit|mask|unmask"
+    r"|set-property|link|revert|reenable|preset|set-default)",
+    r"|nginx\s+-s\s+reload",
+    # Просмотр сертификатов (`certbot certificates`, `acme.sh --list`, `--version`) и путь
+    # `/etc/cron.d/certbot` правкой не считаем: холостые остановки на диагностике TLS
+    # (независимая проверка 25.09.2026). `certbot renew --dry-run` оставлен правкой:
+    # запускает ли он хуки развёртывания, не проверялось. Программа — и по полному пути:
+    # `~/.acme.sh/acme.sh --renew` стоит в скилле rotate-secrets, `/usr/bin/certbot renew`
+    # (без пути правило их не видело — проверка мейнтейнера 26.09.2026). Путь — только
+    # установочный: `/etc/cron.d/certbot` остаётся файлом, а не вызовом.
+    r"|(?<![\w/.-])(?:(?:/usr)?(?:/local)?/s?bin/|/snap/bin/|(?:~|\$HOME|\$\{HOME\}|/root|/home/[^/\s]+)/\.acme\.sh/)?"
+    r"(certbot|acme\.sh)\s+(?!certificates\b|--list\b|--version\b)",
+    r"|ufw\s+(--force\s+)?(allow|deny|delete|limit|reject|default|enable|disable|reset|route|insert|prepend)",
+    r"|(hostnamectl|timedatectl|localectl)\s+(\S+\s+)*?set-",
+    # Учётные записи — это доступ к серверу (inventory/access.md).
+    r"|(?<![\w.-])(useradd|usermod|userdel|adduser|deluser|groupadd|groupdel|groupmod|gpasswd|chpasswd)\b",
+    # Служебная команда панели 3X-UI: перезапуск, обновление, настройки.
+    r"|(?<![\w.-])(\S*/)?x-ui\s+(start|stop|restart|restart-xray|enable|disable|update|install|uninstall|setting)\b",
+    # Правка базы настроек на сервере (`sqlite3 /etc/x-ui/x-ui.db "UPDATE settings …"`); SELECT и .backup — чтение.
+    r"|sqlite3\s.*?[\"']?/(etc|opt|srv|var/www|usr/local)/\S*\s.*\b(update\s+\S+\s+set|insert\s+(or\s+\w+\s+)?into"
+    r"|delete\s+from|replace\s+into|alter\s+table|create\s+(table|index)|drop\s+(table|index))\b",
+    # find, удаляющий в каталогах настроек (`find /etc/nginx/conf.d -name '*.bak' -delete`).
+    r"|find\s+[\"']?/(etc|var/spool/cron|usr/lib/systemd|lib/systemd)/\S*\s.*-delete\b",
+    r"|(?<![\w-])ssh-copy-id\b",
+    r"|(?<![\w.-])visudo\b(?!.*\s-c\b)",
+    # crontab здесь НЕТ — он разбирается по аргументам в crontab_changes(); запись файлов в
+    # конфиги сервера — в pishet_v_konfig() и zapis_perenapravleniem(); запуск обёрток
+    # выкатки — в zapusk_obertki(); git на сервере — в git_na_servere().
+    r"|ln\s+-s.*sites-enabled",
+    # sed -i / perl -pi по «опасным словам» в любом месте пути — ради относительных путей без
+    # `cd` (в том числе локальные копии — осознанный шум). Флаг правки на месте у sed пишут
+    # по-разному: -i, -i.bak, -Ei, «-e … -i», --in-place; у perl -M/-I/-e/-E/-x — не правка.
+    r"|(sed\s+(\S+\s+)*?-([a-zA-Z]*i|-in-place)\S*|perl\s+(\S+\s+)*?-(?:(?![MmIeEx])[a-zA-Z0-9])*i\S*)\s+.*"
+    r"(nginx|compose|\.env|\.conf|" + CRON_PATH + r")",
+]), re.IGNORECASE)
+
+# ── Запись файлов в конфиги сервера (с 25.09.2026) ─────────────────────────────
+# Правка сервера — это и запись файла туда, где живут его настройки: `> /etc/nginx/…`,
+# `| sudo tee /etc/systemd/system/x.service`, `install … /opt/infra/scripts/…`,
+# `sed -i … /etc/…`, `dd of=/etc/…`, удаление или вынос конфига из /etc. Запись в /tmp,
+# /var/lib, /var/log и на свой компьютер — не правка инфраструктуры.
+SERVER_PATH = re.compile(r"^(/etc/|/opt/|/srv/|/var/www/|/var/spool/cron/|/usr/local/"
+                         r"|/(usr/)?lib/systemd/system/|/root/\.(?!cache(/|$))|/home/[^/]+/\.(?!cache(/|$)))")
+# Удаление — только настроек: rm в /opt, /srv, /var/www чистит кэши и выпуски приложений.
+UDALENIE_PATH = re.compile(r"^(/etc/|/var/spool/cron/|/(usr/)?lib/systemd/system/|/root/\.(?!cache(/|$))"
+                           r"|/home/[^/]+/\.(?!cache(/|$)))")
+# Настройки приложения в ЛЮБОМ серверном каталоге (`/root/app-bot/.env`, `/opt/app/compose.yml`).
+CONFIG_FILE = re.compile(r"(^|/)(\.env(\.(?!example|sample|template|dist)[\w-]+)?|(docker-)?compose[\w.-]*\.ya?ml)$",
+                         re.IGNORECASE)
+# Раздача ключей входа — всегда правка доступа, и через `~`.
+KLYUCHI = re.compile(r"^(~|\$HOME|\$\{HOME\})/\.(ssh/(?!known_hosts)|bashrc$|profile$|bash_profile$|zshrc$"
+                     r"|config/systemd(/|$))")
+# Временное и чужое: /tmp, устройства, свой компьютер — диск в Git Bash (/c/…) и домашние
+# каталоги macOS (/Users/…: на серверах Linux такого каталога нет).
+VREMENNOE = re.compile(r"^/(tmp|var/tmp|dev|proc|sys|run|Users|[a-z])(/|$)", re.IGNORECASE)
+# Данные, а не настройки: снимки баз, архивы, логи, пробное восстановление (`/opt/backups/dbs`).
+DANNYE = re.compile(r"^/(opt|srv)/((backups?|dumps?|snap(shots?)?|archives?|restore[\w-]*)(/|$)"
+                    r"|[^/]+/(backups?|logs?)/)")
+# …но скрипт в таком каталоге — программа, а не данные: `install … /opt/infra/backup/run.sh`.
+# Только скрипты: копия конфига (`nginx.conf`, `root.cron`) в каталоге бэкапов — данные.
+PROGRAMMA = re.compile(r"\.(sh|py|pl|rb|js)$", re.IGNORECASE)
+# Копия-страховка с хвостом-датой или меткой (`nginx.conf.bak`, `crontab.bak-2026-09-25`) — не правка.
+# Метка — только в конце или перед датой: `my.old-site.kz` — не страховка, а новый сайт.
+STRAHOVKA = re.compile(r"(\.bak|\.orig|\.old|\.save|\.dist|~)([._-]?\d[\w.:-]*)?$", re.IGNORECASE)
+# Каталог, из которого загружается ВСЁ (`include sites-enabled/*`): копия `.bak` там — второй сайт.
+VKLYUCHENO = re.compile(r"/[\w.-]*-enabled/")
+# Программы, у которых следующее слово — подкоманда, а не наш глагол: `apt install x`,
+# `pip install -r /opt/app/req.txt`, `git mv`, `docker cp` (контейнер, не сервер).
+CHUZHIE = {"apt", "apt-get", "aptitude", "pip", "pip3", "pipx", "npm", "pnpm", "yarn", "dnf", "yum",
+           "brew", "gem", "cargo", "go", "snap", "flatpak", "helm", "make", "docker", "podman",
+           "kubectl", "git", "conda", "poetry", "uv", "composer", "bundle"}
+ZAPUSKATELI = {"sudo", "doas", "env", "xargs", "nohup", "exec", "time", "nice", "ionice", "setsid", "stdbuf"}
+GLAGOL_RE = re.compile(r"(?:^|[\s'\"(`;])\\?(?:(?:/usr)?/s?bin/)?(cp|mv|install|ln|rsync|scp|tee|dd|sed|perl|rm|unlink"
+                       r"|touch|truncate|htpasswd|tar|curl|wget|yq|awk|unzip|openssl|gpg|patch|sponge)(?=\s)")
+PERENAPR_RE = re.compile(r"(?:^|[^<\d&>])\d*(>>?\|?|&>>?)\s*(\S+)")   # `>|` — запись в обход noclobber
+
+def put(tok, cwd=None):
+    t = tok.strip("'\"()`;")
+    t = re.sub(r"^[\w.@-]+:(?=/)", "", t)            # `хост:` у scp и rsync
+    if cwd and t and not t.startswith(("/", "~", "$", "-")) and not re.match(r"^[A-Za-z]:", t):
+        t = cwd.rstrip("/") + "/" + (t[2:] if t.startswith("./") else t)   # после `cd /opt/app`
+    return t.rstrip("/") or t
+
+def v_konfig(tok, spisok=SERVER_PATH, cwd=None):
+    t = put(tok, cwd)
+    if KLYUCHI.match(t):
+        return True
+    if not t.startswith("/") or VREMENNOE.match(t):
+        return False
+    dannye = DANNYE.match(t) and "/../" not in t and not PROGRAMMA.search(t)
+    konfig = (bool(spisok.match(t + ("/" if t.count("/") == 1 else ""))) and not dannye) \
+        or bool(CONFIG_FILE.search(t))
+    return konfig and (bool(VKLYUCHENO.search(t)) or not STRAHOVKA.search(t))
+
+def kopiya_ryadom(src, dst, cwd=None):
+    """`cp nginx.conf nginx.conf.backup.2026…`, `cp -a /opt/infra /opt/infra-backup-…`: цель —
+    тот же путь с хвостом. Точка — всегда страховка (cron и run-parts такие имена не читают);
+    дефис — только на втором уровне (`/etc/nginx-bak`): в `cron.d/` `backup-old` — второе задание."""
+    s, d = put(src, cwd), put(dst, cwd)
+    if not d.startswith(s) or len(d) == len(s) or VKLYUCHENO.search(d):
+        return False
+    hvost = d[len(s):]
+    if "/" in hvost or hvost == ".d" or re.search(r"\.(conf|service|timer|socket|list|sources|local|json|ya?ml|env|ini|toml|sh)$", hvost):
+        return False                                    # `x` → `x.conf`: копия стала загружаемой
+    return hvost[0] in ".~" or (hvost[0] in "-_" and d.count("/") <= 2)
+
+def zapis_perenapravleniem(seg, cwd=None):
+    """`echo … > /etc/x`, `cat >> .env` после `cd /opt/app` — на СЫРОМ сегменте, до отсева
+    read-only: echo и cat пишут здесь не на экран, а в конфиг."""
+    return any(v_konfig(m.group(2), cwd=cwd) for m in PERENAPR_RE.finditer(seg))
+
+def bez_kommentariya(s):
+    """Отрезает `# комментарий` — но не `#` внутри кавычек (`sed 's/x/y # z/'`)."""
+    kav = None
+    for k, ch in enumerate(s):
+        if kav:
+            if ch == kav:
+                kav = None
+        elif ch in "'\"":
+            kav = ch
+        elif ch == "#" and (k == 0 or s[k - 1].isspace()):
+            return s[:k]
+    return s
+
+def _argumenty(rest, s_znacheniem=()):
+    rest = bez_kommentariya(rest)
+    rest = re.sub(r"<<<\s*(\"[^\"]*\"|'[^']*'|\S+)", " ", rest)          # here-string — данные
+    rest = re.sub(r"<<-?\s*['\"]?\w+['\"]?", " ", rest)                  # начало heredoc
+    toks, args, i = rest.split(), [], 0
+    while i < len(toks):
+        t = toks[i]
+        if re.match(r"^\d*(>>?|<<?|&>>?)", t):                          # перенаправления — не аргументы
+            i += 2 if re.fullmatch(r"\d*(>>?|<<?|&>>?)", t) else 1
+            continue
+        if t.strip("'\"") in ("&", "\\;", ";", "+", ""):                 # фон, конец -exec, хвост кавычек
+            i += 1
+            continue
+        if t in s_znacheniem:                                            # `-m 644`, `-e ssh` — значение флага
+            i += 2
+            continue
+        b = re.fullmatch(r"(.*)\{([^{},]*),([^{},]*)\}(['\"]?)", t)      # `x{,.bak}` = `x x.bak`
+        args += [b.group(1) + b.group(2) + b.group(4), b.group(1) + b.group(3) + b.group(4)] if b else [t]
+        i += 1
+    return args
+
+def _znachenie(args, dlinnye, korotkie):
+    """Значение флага: `-o X`, `-oX`, `--output X`, `--output=X`."""
+    for j, a in enumerate(args):
+        if a in dlinnye or a in korotkie:
+            return args[j + 1] if j + 1 < len(args) else None
+        for d in dlinnye:
+            if a.startswith(d + "="):
+                return a.split("=", 1)[1]
+        for k in korotkie:
+            if a.startswith(k) and len(a) > len(k) and not a.startswith("--"):
+                return a[len(k):]
+            if len(k) == 2 and re.fullmatch(r"-[a-zA-Z]+", a) and a.endswith(k[1]) and not a.startswith("--"):
+                return args[j + 1] if j + 1 < len(args) else None   # `-qO X`, `-fsSLo X`
+    return None
+
+def pishet_v_konfig(probe, cwd=None):
+    for m in GLAGOL_RE.finditer(probe):
+        pered, kand, j = probe[:m.start(1)].split(), [], None
+        j = len(pered) - 1
+        while j >= 0 and len(kand) < 2:                 # два слова перед глаголом, без флагов
+            w = pered[j].strip("'\"(`;\\")
+            if not w or w.startswith("-"):
+                j -= 1
+                continue
+            if j >= 1 and pered[j - 1] in ("-u", "-g", "--user", "--group"):
+                j -= 2                                  # `sudo -u git cp` — git здесь пользователь
+                continue
+            kand.append(w.rsplit("/", 1)[-1].lower())
+            j -= 1
+        if kand and (kand[0] in CHUZHIE or (len(kand) > 1 and kand[1] in CHUZHIE and kand[0] not in ZAPUSKATELI)):
+            continue                                    # `apt install`, `git mv`, `docker compose cp`
+        glagol = m.group(1).lower()
+        s_znach = {"cp": ("-S", "--suffix"), "mv": ("-S", "--suffix"), "ln": ("-S", "--suffix"),
+                   "install": ("-m", "-o", "-g", "-S", "--mode", "--owner", "--group", "--suffix"),
+                   "rsync": ("-e", "--rsh", "--exclude", "--include", "--filter", "-f", "--suffix", "--chmod")}
+        args = _argumenty(probe[m.end(1):], s_znach.get(glagol, ()))
+        m_find = re.search(r"(?:^|[\s'\"(;])find\s+[\"']?(/[^\s'\"]*)", probe[:m.start(1)])
+        if m_find and "-exec" in probe[m_find.end():m.start(1)]:
+            args = [m_find.group(1).rstrip("/") + "/x" if a == "{}" else a for a in args]   # `-exec sed -i … {} +`
+        faily = [a for a in args if not a.startswith("-")]
+        if not args:
+            continue
+        vk = lambda a, spisok=SERVER_PATH: v_konfig(a, spisok, cwd)
+        if glagol in ("tee", "touch", "truncate", "sponge"):
+            return any(vk(a) for a in faily)
+        if glagol == "htpasswd":
+            return bool(faily) and vk(faily[0])
+        if glagol == "curl":
+            cel = _znachenie(args, ("--output",), ("-o",))
+            return bool(cel) and vk(cel)
+        if glagol == "wget":
+            cel = _znachenie(args, ("--output-document", "--directory-prefix"), ("-O", "-P"))
+            return bool(cel) and vk(cel)
+        if glagol == "unzip":
+            cel = _znachenie(args, (), ("-d",))
+            return bool(cel) and vk(cel)
+        if glagol == "openssl":
+            return any(vk(c) for c in (_znachenie(args, (), ("-out",)), _znachenie(args, (), ("-keyout",))) if c)
+        if glagol == "gpg":
+            cel = _znachenie(args, ("--output",), ("-o",))
+            return bool(cel) and vk(cel)
+        if glagol == "patch":
+            cel = _znachenie(args, ("--directory",), ("-d",))
+            return vk(cel) if cel else (bool(faily) and vk(faily[0]))
+        if glagol == "tar":
+            if not any(a in ("--extract", "--get") or re.fullmatch(r"-?[a-zA-Z]*x[a-zA-Z]*", a) for a in args[:2]):
+                continue                                # упаковка и просмотр — не правка
+            cel = _znachenie(args, ("--directory",), ("-C",)) or cwd
+            return bool(cel) and vk(cel)
+        if glagol == "dd":
+            if any(re.fullmatch(r"if=/dev/(zero|u?random)", a) for a in args) and \
+                    not any(a.startswith("of=") and vk(a[3:], UDALENIE_PATH) for a in args):
+                continue                                # замер диска: `dd if=/dev/zero of=/opt/ddtest`
+            return any(a.startswith("of=") and vk(a[3:]) for a in args)
+        if glagol in ("sed", "perl", "yq", "awk"):
+            if glagol == "sed":
+                na_meste = any(re.fullmatch(r"-(-in-place\S*|[a-zA-Z]*i\S*)", a) for a in args)
+            elif glagol == "perl":
+                na_meste = any(re.fullmatch(r"-(-in-place\S*|(?:(?![MmIeEx])[a-zA-Z0-9])*i\S*)", a) for a in args)
+            elif glagol == "yq":
+                na_meste = any(a in ("-i", "--inplace") or re.fullmatch(r"-[a-zA-Z]*i[a-zA-Z]*", a) for a in args)
+            else:
+                na_meste = any(a == "-i" and k + 1 < len(args) and args[k + 1] == "inplace" for k, a in enumerate(args))
+            if not na_meste:
+                continue
+            return any(vk(a) for a in faily)
+        if glagol in ("rm", "unlink"):
+            return any(vk(a, UDALENIE_PATH) or (put(a, cwd).startswith("/") and CONFIG_FILE.search(put(a, cwd))
+                                                and not VREMENNOE.match(put(a, cwd))) for a in faily)
+        # cp, mv, install, ln, rsync, scp: цель — «-t каталог» или последний аргумент
+        if glagol == "rsync" and (len(faily) < 2 or any(
+                a in ("--dry-run", "--list-only") or re.fullmatch(r"-[a-zA-Z]*n[a-zA-Z]*", a) for a in args)):
+            continue                                    # `rsync -n`, `--list-only`, один аргумент — показ
+        if glagol == "mv" and any(vk(a, UDALENIE_PATH) for a in faily):   # и `mv -t каталог /etc/x`
+            return True                                 # вынос или переименование конфига из /etc — правка
+        cel = None
+        for k, a in enumerate(args):
+            if a in ("-t", "--target-directory") or re.fullmatch(r"-[a-zA-Z]*t", a):
+                cel = args[k + 1] if k + 1 < len(args) else None
+                break
+            if a.startswith("--target-directory="):
+                cel = a.split("=", 1)[1]
+                break
+            if re.fullmatch(r"-t/\S*", a):
+                cel = a[2:]
+                break
+        if cel is not None:
+            return vk(cel)
+        if glagol in ("cp", "rsync") and len(faily) == 2 and kopiya_ryadom(faily[0], faily[1], cwd):
+            continue                                    # копия-страховка рядом с оригиналом
+        return bool(faily) and vk(faily[-1])
+    return False
+
+# Запуск скрипта-обёртки выкатки. Ожог 2026-08-04: перечислялись только ПРЯМЫЕ команды, а
+# весь IaC-контур устроен обёрткой — настоящие `git pull` и `docker compose up -d` живут
+# ВНУТРИ скрипта на сервере, в ход попадает только его вызов. Узнаём ЗАПУСК (первое слово
+# команды после sudo/bash/ssh-хоста), а не упоминание имени: `git diff deploy-x.sh`,
+# `ls`, `bash -n` — не выкатка (независимая проверка 25.09.2026). Имя — любое со словом
+# deploy/update: `deploy-app.sh`, `redeploy.sh`, `bot_deploy.sh`, `self_update.sh`.
+OBERTKA = re.compile(r"(^|/)([\w.-]*(deploy|update)[\w.-]*\.sh|[\w.]*(deploy|update)-[\w.-]+|[\w.-]+-(deploy|update))$"
+                     r"|^/usr/local/s?bin/[\w.-]*(deploy|update|restart)[\w.-]*$", re.IGNORECASE)
+PREFIKSY = {"sudo", "doas", "env", "nohup", "exec", "time", "nice", "ionice", "timeout", "bash", "sh", "zsh",
+            "source", ".", "setsid", "stdbuf"}
+# Слова оболочки перед командой: `for …; do ./deploy.sh`, `if ./deploy.sh; then`, `{ ./deploy.sh; }`,
+# `! ./update.sh`. Без них первым словом был `do`/`if`, и обёртка проходила (проверка 26.09.2026).
+SLOVA_OBOLOCHKI = {"do", "then", "else", "elif", "if", "while", "until", "!", "{", "(", "exec"}
+VVOD_OBERTKI = re.compile(r"(?:^|\s)(?:\S*/)?(?:bash|sh|zsh|ssh)\s[^<|;&]*<\s*['\"]?(\S+?)['\"]?(?:\s|$)")
+
+# Слово deploy/update в имени — ещё не выкатка: то же слово у проверок и тестов. Ложная
+# остановка 26.09.2026: агент гонял у себя тесты хука `brain-update-check.sh` (и сам
+# `test-brain-update-check.sh`), сторож принял их за выкатку. Есть среди слов имени (через
+# `-` `_` `.`) слово проверки — это не обёртка. Цена: `deploy-check.sh`, если он вдруг
+# что-то меняет, пройдёт мимо; проверка с таким именем по смыслу ничего не выкатывает.
+NE_OBERTKA = {"check", "checks", "test", "tests", "status", "verify", "lint", "probe", "dry"}
+
+def obertka(put_):
+    if not OBERTKA.search(put_):
+        return False
+    imya = re.split(r"[/\\]", put_)[-1].lower()
+    return not (set(re.split(r"[-_.]", imya)) & NE_OBERTKA)
+
+def zapusk_obertki(probe):
+    m = VVOD_OBERTKI.search(probe)                      # `ssh h bash -s prod < deploy.sh`: аргументы
+    if m and OBERTKA.search(m.group(1)):                # между оболочкой и `<` не важны
+        return True
+    slova, i = probe.split(), 0
+    while i < len(slova):
+        w = slova[i].strip("'\"(`\\")
+        if not w:
+            i += 1
+            continue
+        if w in ("bash", "sh", "zsh") and i + 1 < len(slova) and slova[i + 1] == "-n":
+            return False                                # проверка синтаксиса, не запуск
+        if w == "ssh":                                  # ssh [флаги] хост [команда…]
+            i += 1
+            while i < len(slova) and slova[i].startswith("-"):
+                i += 2 if slova[i] in ("-o", "-i", "-p", "-l", "-F", "-J", "-L", "-R", "-D", "-E", "-c", "-m", "-b", "-W") else 1
+            i += 1
+            continue
+        if w == "<" and i + 1 < len(slova):             # `ssh h bash -s < deploy.sh`
+            return obertka(slova[i + 1].strip("'\""))
+        if w in ("-u", "-g", "-C", "-p") and i + 1 < len(slova):
+            i += 2
+            continue
+        if w in PREFIKSY or w in SLOVA_OBOLOCHKI or w.startswith("-") or re.fullmatch(r"\w+=\S*", w) \
+                or re.fullmatch(r"\d+[smhd]?", w):
+            i += 1
+            continue
+        return obertka(w)
+    return False
+
+# git, меняющий рабочую копию на сервере (`cd /opt/app && git pull`, `git -C /opt/infra reset`).
+GIT_RE = re.compile(r"(?:^|[\s'\"(`;])git\s+(-C\s+(\S+)\s+)?(pull|checkout|reset|merge|rebase|stash|apply|am"
+                    r"|cherry-pick|restore|switch)\b")
+
+# Новая рабочая копия на сервере: `sudo git clone https://… /opt/newapp`, `cd /opt && git clone …`.
+GIT_CLONE_RE = re.compile(r"(?:^|[\s'\"(`;])git\s+(?:-C\s+(\S+)\s+)?clone\s+(.*)$")
+GIT_CLONE_ZNACH = ("-b", "--branch", "--depth", "-o", "--origin", "-c", "--config", "--reference", "-j", "--jobs",
+                   "--filter", "--separate-git-dir", "--template", "-u", "--upload-pack")
+
+def git_na_servere(probe, cwd=None):
+    mc = GIT_CLONE_RE.search(probe)
+    if mc:
+        baza = put(mc.group(1), cwd) if mc.group(1) else cwd
+        args = [a for a in _argumenty(mc.group(2), GIT_CLONE_ZNACH) if not a.startswith("-")]
+        if args:
+            kuda = args[1] if len(args) > 1 else re.sub(r"\.git$", "", put(args[0]).rsplit("/", 1)[-1])
+            kuda = put(kuda, baza)
+            if kuda.startswith("/") and not VREMENNOE.match(kuda) and SERVER_PATH.match(kuda + "/"):
+                return True
+    m = GIT_RE.search(probe)
+    if not m:
+        return False
+    kuda = put(m.group(2), cwd) if m.group(2) else cwd
+    return bool(kuda) and kuda.startswith("/") and not VREMENNOE.match(kuda) and bool(SERVER_PATH.match(kuda + "/"))
 
 # Сегменты, начинающиеся с read-only утилиты, изменением не считаются: их аргументы —
 # данные, а не команды. Без этого `grep -n "crontab" file` числился правкой инфраструктуры
 # (холостая остановка в разборе 2026-07-24, F4+).
 READONLY_LEAD = re.compile(
-    r"^(grep|egrep|fgrep|rg|ag|echo|printf|cat|bat|less|more|head|tail|wc|jq|yq|sort|uniq"
+    r"^(grep|egrep|fgrep|rg|ag|echo|printf|cat|bat|less|more|head|tail|wc|jq|sort|uniq"
     r"|column|diff|comm|man|which|type|file|stat|basename|dirname)(\s|$)", re.IGNORECASE)
-PREFIX_RE = re.compile(r"^\s*(sudo\s+(-\w+\s+)*)?(\w+=\S+\s+)*", re.IGNORECASE)
+PREFIX_RE = re.compile(r"^\s*(sudo\s+((-[ug]|--user|--group)\s+\S+\s+|-\w+\s+)*)?(\w+=\S+\s+)*", re.IGNORECASE)
+SSH_GOLOVA = re.compile(r"^ssh(\s+-\w+(\s+(?!-)[^\s'\"]+)?)*\s+[^\s'\"-]\S*\s*")
+
+def komanda(probe):
+    """Сама команда: без `ssh [флаги] хост`, открывающей кавычки и sudo."""
+    t = probe
+    m = SSH_GOLOVA.match(t)
+    if m:
+        t = t[m.end():]
+    t = PREFIX_RE.sub("", t.lstrip("'\"(` ")).strip()
+    t = re.sub(r"^((ba|z|da)?sh|su(\s+\S+)*?)\s+(-\w+\s+)*-\w*c\s+['\"]?", "", t)   # `bash -c "cd /opt/app && …"`
+    return PREFIX_RE.sub("", t).strip()
+
+# crontab меняет расписание всем, КРОМЕ просмотра `crontab -l` (и `-u пользователь -l`).
+# До 25.09.2026 правило было `crontab\s+` — и ловило просмотр: холостые остановки на
+# обычной диагностике (04.08 и 25.09.2026, `sudo crontab -l 2>&1 | grep -v "^#"`).
+# Поэтому разбираем аргументы, а не ищем подстроку: запись бывает и без флагов —
+# `crontab файл`, `… | crontab -`, `(crontab -l; echo …) | crontab -` (просмотр и запись
+# в одной строке: второй сегмент обязан сработать).
+# Программа — и по полному пути (`/usr/bin/crontab`, `\crontab`), но НЕ файл `/etc/crontab`,
+# не `crontabs/`, не `crontab.bak`, не шаблон поиска `crontab*`.
+CRONTAB_RE = re.compile(r"(?:^|[\s(`'\"])\\?(?:(?:/usr)?(?:/local)?/s?bin/)?crontab(?![\w./*?\[-])(.*)$",
+                        re.IGNORECASE)
+# Команды, у которых слово crontab — только аргумент (что искать, какой пакет, чей журнал).
+# Действует ТОЛЬКО на разбор crontab: find с -exec/-delete в общий READONLY_LEAD не кладём.
+CRONTAB_FOREIGN = re.compile(r"^(find|journalctl|whereis|locate|plocate|mlocate|dpkg|dpkg-query"
+                             r"|apt-cache|apt-file|ls|zgrep|zegrep|zcat|xzgrep|getent)(\s|$)", re.IGNORECASE)
+REDIR_RE = re.compile(r"^\d*(>>?|<|&>)")              # 2>&1, >файл, 2>/dev/null, <файл
+REDIR_ALONE = re.compile(r"^\d*(>>?|<|&>)$")           # оператор отдельно — цель следующим словом
+
+def crontab_changes(probe, piped):
+    if CRONTAB_FOREIGN.match(probe) and not re.search(r"\s-(exec|execdir|ok|okdir)\s", probe):
+        return False
+    m = CRONTAB_RE.search(probe)
+    if not m:
+        return False
+    rest = re.split(r"(?:^|\s)#", m.group(1), maxsplit=1)[0]     # комментарий bash — не аргументы
+    # Расписание из вложенной команды: `crontab <(crontab -l | grep -v x)`, `crontab <<<"$(…)"`.
+    # Её -l внешнему вызову не принадлежит — отрезаем, а сам факт вложения = установка.
+    vlozh = re.search(r"<\(|<<<", rest)
+    if vlozh:
+        rest = rest[:vlozh.start()]
+    rest = re.sub(r"\$\([^()]*\)|`[^`]*`", "SUBST", rest)        # $(date +%F) — одно слово
+    rest = re.split(r"[)`]", rest, maxsplit=1)[0]                # конец $( … ), где стоял сам crontab
+    rest = re.split(r"\|\|?|&&|;", rest, maxsplit=1)[0]            # канал внутри кавычек-данных не режется
+    toks = [t.strip("'\"(") for t in rest.split()]
+    smotrim, stdin_file, i = False, False, 0
+    while i < len(toks):
+        t = toks[i]
+        if not t:
+            i += 1
+        elif REDIR_RE.match(t):
+            stdin_file = stdin_file or t.lstrip("0123456789").startswith("<")
+            i += 2 if REDIR_ALONE.match(t) else 1
+        elif t == "-u":
+            i += 2                                     # пользователь — не команда
+        elif t in ("-l", "-V"):
+            smotrim, i = True, i + 1
+        elif t == "-T":
+            smotrim, i = True, i + 2                  # проверка синтаксиса файла — не установка
+        else:
+            return True        # -e, -r, -i, «-», файл, незнакомый флаг — расписание меняется
+    # Без аргументов crontab читает новое расписание со stdin — из канала, «< файла» или
+    # вложенной команды (cronie; Debian/Ubuntu голый вызов отвергают). Голое слово в чужой
+    # команде (`command -v crontab`, `dpkg -S crontab`) правкой не считаем.
+    return not smotrim and (piped or stdin_file or bool(vlozh))
+
+def razbit(cmd):
+    """Режет команду на сегменты по `| || && ;` и переводу строки — но НЕ внутри кавычек-данных.
+    Кавычки после `ssh хост` и `-c` (bash -c, sh -c, su -c) содержат команды — их режем; кавычки
+    `sed`, `grep`, `awk`, `echo` — данные: `sed -i 's|a|b|' /etc/x` и директивы nginx с `;`
+    остаются одной командой (независимая проверка 25.09.2026: раньше такая правка проходила).
+    Возвращает [(сегмент, разделитель перед ним)]."""
+    segs, buf, razd, stek, i, n = [], [], "", [], 0, len(cmd)
+    def kod_li():
+        # Текст от начала сегмента (или от открывшей кода кавычки) до этой кавычки: команды
+        # внутри — только если перед ней РОВНО `ssh [флаги] хост`, `eval` или `… -c`.
+        # Смотрим только хвост: `ssh [флаги] хост` и `eval` длиннее 300 символов не бывают, а
+        # склейка всего буфера на каждой кавычке делала разбор квадратичным — строка с 20000
+        # пар кавычек не укладывалась в таймаут хука, и он молча пропускал (26.09.2026).
+        nachalo = max(stek[-1][2] + 1 if stek else 0, len(buf) - 300)
+        tekst = PREFIX_RE.sub("", "".join(buf[nachalo:])).strip()
+        return bool(re.search(r"(^|\s)-\w*c$", tekst) or tekst == "eval" or SSH_GOLOVA.fullmatch(tekst + " "))
+    while i < n:
+        ch = cmd[i]
+        if ch == "\\" and not (stek and stek[-1][0] == "'"):
+            buf.append(cmd[i:i + 2])
+            i += 2
+            continue
+        if ch in "'\"":
+            if stek and stek[-1][0] == ch:
+                stek.pop()
+            elif not stek or stek[-1][1]:               # внутри данных чужая кавычка — просто символ
+                stek.append((ch, kod_li(), len(buf)))
+            buf.append(ch)
+            i += 1
+            continue
+        if ch == "\n":
+            stek = []                                   # незакрытую кавычку через перевод строки не тянем
+        if ch == "\n" or all(k for _, k, _ in stek):
+            razdel = next((s for s in ("||", "&&", "|", ";", "\n") if cmd.startswith(s, i)
+                           and not (s == "|" and i > 0 and cmd[i - 1] == ">")), None)
+            if razdel:
+                segs.append(("".join(buf), razd))
+                buf, razd = [], razdel
+                stek = [(q, k, -1) for q, k, _ in stek]  # новый сегмент начинается внутри тех же кавычек
+                i += len(razdel)
+                continue
+        buf.append(ch)
+        i += 1
+    segs.append(("".join(buf), razd))
+    return segs
+
+# Два чтения команды. Сторож дисциплинарный и fail-open, поэтому точность разбора ему нужна
+# только для того, чтобы НАЙТИ больше правок, а не чтобы пропустить больше текста (правило 4
+# свода замков; решение оператора 25.07.2026: остановка на упоминании — цена, а не дефект).
+#
+# 1) Точное чтение — razbit(): понимает кавычки, не режет `sed -i 's|a|b|' /etc/x` и директивы
+#    nginx с `;`, различает `cd /opt/app && … .env`. Им найдены правки, которых раньше не видели.
+# 2) Грубое чтение — как до 25.09.2026: режем по `| || && ;` и переводу строки, не глядя на
+#    кавычки и не вынимая тел heredoc.
+# Правка найдена, если её нашло ЛЮБОЕ из двух. Первая версия этого PR выкидывала тела heredoc
+# «у известного читателя» и считала кавычки sed/echo данными — и на независимой проверке
+# 26.09.2026 пропустила 17 правок из 39, которые старый замок ловил: кавычка на несколько строк,
+# `ssh "$H" '…; sudo tee /etc/…'`, `while read c; do ssh h "$c"; done <<EOF`, `bash /dev/stdin <<EOF`.
+# Цена грубого чтения — остановка на тексте коммита или PR, где написана команда: так было
+# и до 25.09.2026, это та самая цена из правила 4.
+GRUBYJ_RAZREZ = re.compile(r"(\|\||&&|;|\||\n)")
+
+def proverit_segment(seg, razd, cwd, tochno=True):
+    """Одна проверка сегмента. Возвращает (находка или None, cwd после сегмента)."""
+    piped = razd == "|"
+    probe = PREFIX_RE.sub("", seg).strip()
+    sama = komanda(probe)
+    mcd = re.match(r"^cd\s+(\S+)", sama)
+    if mcd:                                         # `cd /opt/app && echo X >> .env`
+        cel = put(mcd.group(1), cwd)
+        cwd = cel if cel.startswith("/") and not VREMENNOE.match(cel) else None
+    if zapis_perenapravleniem(seg, cwd):
+        return (probe or seg.strip()), cwd
+    if not probe or READONLY_LEAD.match(sama):
+        return None, cwd
+    # crontab в грубом чтении: `|` внутри кавычек рождает ложные куски (`grep -E "x|crontab" лог`
+    # даёт «команду» `crontab" лог`). Поэтому там не считаем канал и слово, прилипшее к кавычке;
+    # эти формы — `… | crontab`, `'crontab' -r` — ловит точное чтение, оно кавычки понимает.
+    cron = crontab_changes(probe, piped) if tochno else \
+        (not re.search(r"crontab['\"]", probe) and crontab_changes(probe, False))
+    if (CHANGE_RE.search(probe) or cron or pishet_v_konfig(probe, cwd)
+            or zapusk_obertki(probe) or git_na_servere(probe, cwd)):
+        return probe, cwd
+    return None, cwd
+
+def _po_segmentam(segs, tochno):
+    cwd = None
+    for seg, razd in segs:
+        hit, cwd = proverit_segment(seg, razd, cwd, tochno)
+        if hit:
+            return hit
+    return None
+
+def grubye_segmenty(cmd):
+    chasti = GRUBYJ_RAZREZ.split(re.sub(r"\\\r?\n", " ", cmd))
+    segs, razd = [], ""
+    for k, chast in enumerate(chasti):
+        if k % 2:
+            razd = chast                                # нечётные — сами разделители
+        else:
+            segs.append((chast, razd))
+    return segs
+
+# База настроек правится SQL, пришедшим через канал или heredoc: `echo "UPDATE …" | ssh h 'sqlite3
+# /etc/x-ui/x-ui.db'`, `ssh h 'sqlite3 /etc/x-ui/x-ui.db' <<SQL`. Программа и SQL оказываются в
+# разных кусках, и ни одно чтение по кускам их не сведёт — смотрим всю команду целиком.
+SQLITE_BAZA = re.compile(r"sqlite3\s+(?:-\S+\s+)*['\"]?/(?:etc|opt|srv|var/www|usr/local)/\S+")
+SQL_ZAPIS = re.compile(r"\b(update\s+\S+\s+set|insert\s+(or\s+\w+\s+)?into|delete\s+from|replace\s+into"
+                       r"|alter\s+table|create\s+(table|index)|drop\s+(table|index))\b", re.IGNORECASE)
 
 def changes_infra(cmd):
-    """Ищет изменяющую команду посегментно, пропуская read-only обёртки."""
-    for seg in re.split(r"\|\||&&|;|\||\n", cmd):
-        probe = PREFIX_RE.sub("", seg).strip()
-        if not probe or READONLY_LEAD.match(probe):
+    """Ищет изменяющую команду в двух чтениях (см. выше), пропуская read-only сегменты."""
+    tochnyj = re.sub(r"\\\r?\n", " ", cmd)             # продолжение строки обратной косой — как в bash
+    tochnyj = re.sub(r"\|[ \t]*\r?\n\s*", "| ", tochnyj)   # канал, перенесённый на новую строку
+    hit = _po_segmentam(razbit(tochnyj), True) or _po_segmentam(grubye_segmenty(cmd), False)
+    if not hit:
+        baza = SQLITE_BAZA.search(cmd)
+        if baza and SQL_ZAPIS.search(cmd):
+            hit = baza.group(0)
+    return hit
+
+# Обновление inventory командой. Раньше засчитывалось любое упоминание папки `inventory/` —
+# и `cat inventory/README.md` рядом с правкой сервера выключал сторож на весь ход (проверка
+# 26.09.2026). Теперь чтение (cat, grep, ls, git diff, sed -n …) не в счёт; в счёт — запись
+# в inventory, любая другая команда над ним и пересборка снимка или дашборда.
+INVENTORY_RE = re.compile(r"inventory[/\\]|/infra/.*\.md$|refresh\.sh|dump-snapshot", re.IGNORECASE)
+INVENTORY_PUT = re.compile(r"inventory[/\\]|/infra/\S*\.md\b", re.IGNORECASE)
+INVENTORY_SBORKA = re.compile(r"refresh\.sh|dump-snapshot|inventory-scan", re.IGNORECASE)
+CHTENIE = re.compile(r"^(ls|find|tree|realpath|sed\s+-n|git\s+(-C\s+\S+\s+)?(diff|log|show|status|blame|grep))(\s|$)",
+                     re.IGNORECASE)
+
+def obnovil_inventory(cmd):
+    if INVENTORY_SBORKA.search(cmd):
+        return True
+    for seg, _ in grubye_segmenty(cmd):
+        if not INVENTORY_PUT.search(seg):
             continue
-        if CHANGE_RE.search(probe):
-            return probe
-    return None
+        if any(INVENTORY_PUT.search(m.group(2)) for m in PERENAPR_RE.finditer(seg)):
+            return True                                 # `cat > inventory/x.md <<EOF`, `echo … >> …`
+        sama = komanda(PREFIX_RE.sub("", seg).strip())
+        if not (READONLY_LEAD.match(sama) or CHTENIE.match(sama)):
+            return True
+    return False
 
 changed, updated = [], False
 for rec in turn:
+    vremya_vyshlo()
     if rec.get("type") != "assistant":
         continue
     for block in (rec.get("message") or {}).get("content") or []:
@@ -158,7 +806,7 @@ for rec in turn:
             hit = changes_infra(cmd)
             if hit:
                 changed.append(hit.splitlines()[0][:90])
-            if INVENTORY_RE.search(cmd):       # обновление снимка/дашборда скриптом — тоже засчитываем
+            if obnovil_inventory(cmd):         # запись в inventory или пересборка снимка/дашборда
                 updated = True
         elif name in ("Write", "Edit", "NotebookEdit"):
             if INVENTORY_RE.search(str(inp.get("file_path", ""))):
@@ -166,30 +814,6 @@ for rec in turn:
 
 if not changed or updated:
     sys.exit(0)
-
-# ── Предохранитель 2: один блок на ход, даже без stop_hook_active ─────────────
-key = hashlib.sha256((str(d.get("session_id", "")) + last_user_text[:400]).encode()).hexdigest()[:16]
-tmpdir = tempfile.gettempdir()
-mark = os.path.join(tmpdir, f"sysadmin-inv-guard-{key}")
-
-# Убираем за собой: метки старше двух суток (§3.10) — иначе TMPDIR копит мусор.
-import time
-try:
-    cutoff = time.time() - 2 * 86400
-    for name in os.listdir(tmpdir):
-        if name.startswith("sysadmin-inv-guard-"):
-            p = os.path.join(tmpdir, name)
-            if os.path.getmtime(p) < cutoff:
-                os.remove(p)
-except Exception:
-    pass
-
-if os.path.exists(mark):
-    sys.exit(0)
-try:
-    open(mark, "w").close()
-except Exception:
-    sys.exit(0)                      # не смогли поставить метку — лучше пропустить, чем зациклить
 
 sample = "\n".join(f"  • {c}" for c in changed[:3])
 reason = f"""§3.2 — инфраструктура изменилась, inventory не обновлён.
@@ -208,5 +832,48 @@ reason = f"""§3.2 — инфраструктура изменилась, invent
 
 Останавливаю только один раз за ответ: закончишь снова — пропущу."""
 
-print(json.dumps({"decision": "block", "reason": reason}, ensure_ascii=False))
+ostanovit_odin_raz(reason)
 PY
+}
+# ── КОНЕЦ ПРОВЕРКИ ────────────────────────────────────────────────────────────
+
+# ── Сторож времени: бюджет покрывает ВЕСЬ хук (ADR-0044, дополнение 2026-10-06) ─
+# Раньше бюджет считала python-часть от своего старта, а запуск python3 и `cat` не считал
+# никто. На Windows `python3` — часто заглушка Microsoft Store (сотни миллисекунд даже в
+# покое), а на занятой машине запуск растягивается на десятки секунд: 03.10.2026 замок
+# красной зоны так шёл 36,5 с при таймауте 15 с. Устройство — как у замка: python-часть в
+# фоне, здесь только встроенный `read -t`; не дождались — «не успел» печатается встроенным
+# `printf`. Фоновая часть не держит трубы движка (stderr заменён насовсем); завершение
+# узнаётся по метке конца, а не по коду `read` и не по `$!` — так работает и bash 3.2.
+# Упавший python3 метку всё равно оставляет: это «нечем проверить» — fail-open, как и
+# раньше; «не успел» — только когда метки нет.
+#
+# «Один раз» без python: метка во временном каталоге по сессии. «1» — мы уже остановили ответ
+# по нехватке времени и ещё не видели продолжения: следующий раз пропускаем и сбрасываем.
+# Продолжение с stop_hook_active сбрасывает её выше. Не смогли записать метку — пропускаем:
+# лучше молча, чем зациклить.
+ne_uspel() {
+  local bylo=""
+  [ -f "$METKA_VREMYA" ] && { IFS= read -r bylo < "$METKA_VREMYA" || true; } 2>/dev/null
+  if [ "$bylo" = "1" ]; then
+    { printf '0' > "$METKA_VREMYA"; } 2>/dev/null
+    exit 0
+  fi
+  { printf '1' > "$METKA_VREMYA"; } 2>/dev/null || exit 0
+  printf '%s\n' '{"decision":"block","reason":"§3.2 — сторож inventory не успел разобрать этот ответ за '"$HOOK_BUDGET"' с.\n\nПрерванный по таймауту хук движок читает как «проверено», поэтому говорю прямо: проверки\nне было. Посмотри сам, были ли в этом ответе команды, меняющие инфраструктуру. Если были —\nобнови соответствующий документ inventory; если нет — скажи оператору одной строкой, что\nобновлять нечего.\n\nОстанавливаю только один раз за ответ: закончишь снова — пропущу."}'
+  exit 0
+}
+KONETS_PROVERKI='__KONETS_PROVERKI_STOROZHA__'
+OSTALOS=$(( HOOK_BUDGET - SECONDS ))
+(( OSTALOS > 0 )) || ne_uspel
+exec 3< <(exec 2>/dev/null; proverit; printf '%s' "$KONETS_PROVERKI")
+PROVERKA_PID="${!:-}"
+VERDIKT=""
+IFS= read -r -d '' -t "$OSTALOS" VERDIKT <&3
+case "$VERDIKT" in
+  *"$KONETS_PROVERKI") VERDIKT="${VERDIKT%"$KONETS_PROVERKI"}" ;;
+  *) [ -n "$PROVERKA_PID" ] && kill "$PROVERKA_PID" 2>/dev/null
+     ne_uspel ;;
+esac
+[ -n "$VERDIKT" ] && printf '%s' "$VERDIKT"
+exit 0
