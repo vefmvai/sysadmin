@@ -1,12 +1,17 @@
 ---
 knowledge_domain: vpn
 layer: reference
-last_researched: 2026-05-22
+last_researched: 2026-08-11
 ttl_days: 60
 sources_checked:
   - https://xtls.github.io/en/config/routing.html
   - https://xtls.github.io/en/config/inbounds/socks.html
   - https://github.com/XTLS/Xray-core
+  - https://github.com/XTLS/Xray-core/blob/main/proxy/tun/README.md
+  - https://github.com/XTLS/Xray-core/pull/6366
+  - https://github.com/XTLS/Xray-core/pull/6398
+  - https://github.com/XTLS/Xray-core/pull/6434
+  - https://github.com/XTLS/Xray-core/pull/6447
   - практический опыт настройки (2026-05-22)
 ---
 
@@ -61,16 +66,22 @@ Code). Здесь — про **полноценный routing-split** по geoip
   одни и те же `geosite:ru`, `geoip:ru`, `outboundTag`. Если сисадмин уже умеет
   серверный конфиг, локальный пишется так же.
 - Xray умеет **chain через `dialerProxy`** (VLESS→VLESS), чего нет в sing-box
-  (см. `xray-mac-chain.md` — issue SagerNet/sing-box#1562 закрыт «not planned»).
+  (см. `xray-mac-chain.md` — issue SagerNet/sing-box#3205 «Detour doesnt work on
+  outbound protocols» закрыт «not planned»). ⚠️ Оговорка: в #3205 речь о падении
+  связки VLESS→Trojan, а не VLESS→VLESS; отказ разработчиков относится к detour
+  на outbound-протоколах в целом, но именно нашу связку источник не проверяет.
 - Ставится через терминал (`brew`, бинарник с GitHub) — хорошо ложится на работу
   с агентом-сисадмином.
+- Xray умеет **родной TUN-inbound** (`"protocol": "tun"`): интерфейс, MTU и адрес
+  задаются в `settings`, а с v26.6.27 (27.06.2026) ядро само правит системную
+  таблицу маршрутов по `autoSystemRoutingTable` и выбирает внешний интерфейс по
+  `autoOutboundsInterface` на Windows, Linux и macOS. Внешний tun2socks-слой
+  (антипаттерн tun2proxy — `xray-mac-chain.md`) для системного перехвата больше
+  не нужен.
 
 **Минусы / почему нишевая:**
 - Нет «приличного» нативного GUI под routing-split (в отличие от
   GUI.for.SingBox для sing-box). Конфиг правится руками в JSON.
-- TUN на Xray-core на десктопе — отдельная морока (Xray сам не поднимает
-  системный TUN так гладко, как sing-box; часто нужен tun2socks-слой, который
-  конфликтен — см. `xray-mac-chain.md` антипаттерн tun2proxy).
 - На мобильных Xray-routing руками — только через клиенты вроде v2rayNG/Happ,
   где raw route-конфиг доступен ограниченно.
 
@@ -152,8 +163,10 @@ geoip.dat/geosite.dat Xray тянет автоматически (или кла�
 
 ## §4 Как трафик попадает в локальный Xray
 
-Xray поднимает только SOCKS/HTTP **inbound на localhost** — он не перехватывает
-системный трафик сам. Варианты «как направить трафик в него»:
+Xray умеет два режима: SOCKS/HTTP **inbound на localhost** (тогда системный трафик
+он действительно не перехватывает) и **родной TUN-inbound** (`"protocol": "tun"` —
+Linux, Windows, macOS, Android, iOS), который перехватывает трафик на сетевом
+уровне. Варианты «как направить трафик в него»:
 
 1. **System proxy / per-app proxy** — указать приложению `socks5://127.0.0.1:10808`.
    Простой, но ловит только приложения, знающие про прокси (браузер — да,
@@ -161,21 +174,33 @@ Xray поднимает только SOCKS/HTTP **inbound на localhost** — �
 2. **HTTP-bridge через privoxy** — для программ, понимающих только HTTP_PROXY
    (Claude Code/undici не умеет SOCKS5): privoxy `forward-socks5 / 127.0.0.1:10808 .`
    на :8118 (см. `xray-mac-chain.md` §2). Затем `HTTPS_PROXY=http://127.0.0.1:8118`.
-3. **TUN через tun2socks-слой** — для перехвата ВСЕГО системного трафика.
-   ⚠️ Конфликтен (tun2proxy правит routes/DNS и не чистит — антипаттерн в
-   `xray-mac-chain.md`). Если нужен полный TUN-перехват с гибким routing — проще
-   взять sing-box (`routing-on-device-singbox.md`), он поднимает TUN нативно.
+3. **Родной TUN-inbound Xray** (`"protocol": "tun"`, поля `name`, `mtu`, `gateway`) —
+   для перехвата ВСЕГО системного трафика. Ядро само добавляет и снимает системные
+   маршруты по `autoSystemRoutingTable` и выбирает внешний интерфейс по
+   `autoOutboundsInterface`; на macOS и Linux эти поля приехали в v26.6.27
+   (27.06.2026, PR #6366 «on macOS and Linux **as well**» — на Windows они
+   работали раньше). Внешний слой tun2socks/tun2proxy для этого больше не нужен
+   (он же — антипаттерн в `xray-mac-chain.md`: правит routes/DNS и не чистит за собой).
+   ⚠️ Главная грабля — сетевая петля: маршрутизировать `0.0.0.0/0` в TUN, не
+   исключив собственный аплинк Xray, значит положить сеть (предупреждение в
+   README TUN-инбаунда ядра: <https://github.com/XTLS/Xray-core/blob/main/proxy/tun/README.md>).
 
-**Практический вывод:** Xray on-device хорош для **proxy-режима** (браузер +
-программы через HTTP_PROXY). Для полного системного TUN-перехвата с routing —
-sing-box удобнее.
+**Практический вывод:** Xray on-device годится и для **proxy-режима** (браузер +
+программы через HTTP_PROXY), и для полного системного перехвата через родной
+TUN-inbound (с v26.6.27, 27.06.2026). Но у sing-box остаётся системный DNS
+(README ядра Xray прямо говорит, что на Linux и macOS системный DNS из поля `dns`
+не настраивается и остаётся за ОС) и более простой запуск
+(`routing-on-device-singbox.md`). Насколько это перевешивает на практике —
+источниками не мерялось, выбирать по своей задаче.
 
 ---
 
 ## §5 macOS GUI-приложения и env (грабля)
 
-GUI-приложения на macOS (VSCode) **не наследуют** shell environment. Передать им
-proxy можно только через `launchctl setenv` + полный перезапуск приложения:
+GUI-приложения на macOS (VSCode) **не наследуют** shell environment. В proxy-режиме
+передать им proxy можно через `launchctl setenv` + полный перезапуск приложения;
+в TUN-режиме env не нужен вовсе, а разделение по программам делается правилом
+маршрутизации `process`, которое работает на macOS с v26.7.11 (11.07.2026):
 
 ```bash
 launchctl setenv HTTPS_PROXY http://127.0.0.1:8118
@@ -190,7 +215,7 @@ launchctl setenv HTTP_PROXY  http://127.0.0.1:8118
 ## §6 Связи
 
 - **Дефолтный путь (split на сервере, тот же Xray-синтаксис):** `routing-server-3xui.md`
-- **On-device через sing-box (GUI, нативный TUN):** `routing-on-device-singbox.md`
+- **On-device через sing-box (GUI, системный DNS, проще запуск):** `routing-on-device-singbox.md`
 - **Xray chain-bypass для Claude Code на Mac (proxy-only):** `xray-mac-chain.md`
 - **Сценарий консультации, hub:** `vpn-consultation-flow.md`
 - **Теория протоколов:** `vpn-protocols.md`

@@ -1,7 +1,7 @@
 ---
 knowledge_domain: vpn
 layer: reference
-last_researched: 2026-05-17
+last_researched: 2026-08-11
 ttl_days: 60
 sources_checked:
   - https://blog.cloudflare.com/russian-internet-users-are-unable-to-access-the-open-internet/
@@ -19,6 +19,11 @@ sources_checked:
   - https://bunny.net/vs/keycdn/
   - https://www.cdn07.com/en/global-top-50-cdn-providers-analysis
   - https://github.com/XTLS/REALITY/blob/main/README.en.md
+  - https://habr.com/ru/articles/1044396/
+  - https://habr.com/ru/articles/1047442/
+  - https://ebyebots.ru/blog/rkn-«polozhil»-runet-massovyj-sboj-sajtov-na-hostingah-beget-timeweb-selectel-i-spaceweb-iz-za-obnovleniya-nastroek-tspu/
+  - https://github.com/XTLS/REALITY/commit/8cdf7bf9c7f0
+  - https://github.com/refraction-networking/utls/blob/master/u_common.go
 ---
 
 # Fronting-стратегии: маскировка под легитимный трафик
@@ -41,12 +46,23 @@ Cloudflare WARP, Reality+fallback, host fronting, uTLS, и опыт иранск
 | Уровень блокировки | Что делает цензор | Что помогает |
 |---|---|---|
 | **1. DPI (анализ содержимого)** | Распознаёт сигнатуры протоколов, fingerprint TLS | Маскировка протокола, uTLS fingerprint, Reality |
-| **2. IP-блокировка** | Блокирует конкретные адреса | Прятать сервер за инфраструктурой популярного CDN |
+| **2. IP-блокировка** | Блокирует конкретные адреса, а также подсети и целые AS по репутации (частный случай — сноска ниже) | Прятать сервер за инфраструктурой популярного CDN + выбирать хостинг по репутации AS |
 | **3. Белые списки** | Пускает только в одобренные IP | Прятать сервер **внутри** одобренного списка (CF Workers, ArvanCloud для Ирана) |
 
 **Важно:** fronting лечит DPI и IP-блокировку, но **не лечит белые списки**, если
 ваш fronting-IP в них не входит. Это главный риск в РФ-2026 для мобильных
 операторов: их white-list содержит ~500 сервисов, Cloudflare-IP туда не входят.
+
+**Сноска к уровню 2 — РФ, с июня 2026 (частный случай, не общее правило):** ТСПУ
+оценивает не отдельные адреса, а репутацию подсети и автономной системы целиком;
+затронуты в том числе российские дата-центры (Selectel, Яндекс.Облако, Cloud.ru),
+ограничение применяется одинаково на мобильных и домашних провайдерах. Следствие:
+выбор хостинга (AS) стал самостоятельным фактором наравне с маскировкой за CDN
+(MEDIUM: [Habr 1044396](https://habr.com/ru/articles/1044396/), 2026-06-06 —
+наблюдения комьюнити, не спецификация ТСПУ; MEDIUM: [ebyebots](https://ebyebots.ru/blog/rkn-«polozhil»-runet-massovyj-sboj-sajtov-na-hostingah-beget-timeweb-selectel-i-spaceweb-iz-za-obnovleniya-nastroek-tspu/),
+2026-06-05 — массовый сбой сайтов на хостингах Beget, TimeWeb, Selectel,
+SpaceWeb из-за обновления настроек ТСПУ: независимое подтверждение того, что
+фильтрация прилетает по хостингу целиком, а не по отдельным адресам).
 
 ---
 
@@ -269,14 +285,50 @@ DPI может различить: «это не Chrome/Firefox, это кака
 **uTLS** имитирует fingerprint реального браузера. Параметр `fingerprint` в Reality
 и других protocols:
 
-- `"chrome"` — default; имитирует актуальный Chrome
+- `"chrome"` — default; имитирует актуальный Chrome (⚠️ для РФ-2026 подозрителен —
+  см. рекомендацию ниже)
 - `"firefox"` — Firefox
 - `"safari"` — Safari
-- `"edge"` — Edge (новее Chrome-варианта)
+- `"edge"` — **старый** профиль Edge 85 (в uTLS `HelloEdge_Auto = HelloEdge_85`), без
+  обмена ключами X25519MLKEM768; ⚠️ с Reality-сервером Xray ≥ v26.9.9 не подключается
+  (см. рекомендацию ниже)
 - `"random"` / `"randomized"` — каждое соединение — новый fingerprint
 - ⚠️ `"chrome_pq"` — **СЛОМАН** с VLESS+XTLS-REALITY (sing-box #2084, Xray #4852)
 
-**Рекомендация для РФ-2026:** `chrome` (default) или `random` для разнообразия.
+**Рекомендация для РФ-2026 (пересмотрено 2026-08-11, уточнено 2026-10-15):** `firefox`.
+
+🔴 **`edge` из пары выпал (2026-10-15).** С Xray-core v26.9.9 Reality-сервер
+отвергает ClientHello без X25519MLKEM768 перед необязательным X25519 — такое
+соединение не признаётся REALITY и уходит на донор, клиент просто не подключается
+(HIGH: [REALITY, коммит 8cdf7bf9c7](https://github.com/XTLS/REALITY/commit/8cdf7bf9c7f0)
+от 2026-09-08, в `go.mod` Xray — с v26.9.9). Отпечаток `edge` в uTLS — профиль Edge 85
+без этого обмена (HIGH: [uTLS `u_common.go`](https://github.com/refraction-networking/utls/blob/master/u_common.go),
+`HelloEdge_Auto = HelloEdge_85`). Стенд участника Nike152 (14.10.2026, комментарий к
+vefmvai/sysadmin#15): Reality-сервер 26.10.10 пропускает `firefox`, `chrome`,
+`safari` и отвергает `edge`; сервер 26.4.25 `edge` пропускает. То есть `edge`
+обрывает связь, как только сервер — свой или провайдера — обновится до 26.9.9+.
+Из пары, которую в июне относили к проходящим ТСПУ, с новыми серверами совместим
+только `firefox`. *Исправлено по разбору Nike152 к vefmvai/sysadmin#15.*
+
+Наблюдения комьюнити о ТСПУ, на которых держалась июньская пара:
+с июня 2026 ТСПУ относит к подозрительным отпечатки `chrome`, `safari`, `ios`;
+`firefox`, `edge`, Android OkHttp у большинства операторов пока проходят
+(MEDIUM: [Habr 1044396](https://habr.com/ru/articles/1044396/) от 2026-06-06,
+апдейт от 2026-06-16 — наблюдения комьюнити, не спецификация ТСПУ). Само
+разделение отпечатков подтверждено только этой статьёй, второго источника
+на него нет. Апдейт от 2026-06-16, судя по тексту статьи, убрал «длинную
+заморозку» на 10 минут — поэтому цифра 600 с в файл сознательно не внесена:
+источник её отозвал, а независимого подтверждения нет.
+
+Отпечаток сам по себе блокировку не даёт — он одно из условий связки
+«подозрительная подсеть/AS + подозрительный отпечаток + более 3 параллельных
+TLS-хендшейков к одному SNI за 60 с»; штраф — заморозка соединений на 120 с
+(MEDIUM: [Habr 1047442](https://habr.com/ru/articles/1047442/) от 2026-06-15 —
+наблюдения комьюнити, не спецификация ТСПУ).
+`random` больше не нейтральный выбор: гарантии, что случайный профиль не
+окажется chrome-подобным, нет, поэтому до следующей проверки фиксирую явный
+`firefox`. Менять отпечаток на лету, когда заморозка уже наступила,
+не следует.
 
 ---
 
@@ -336,8 +388,15 @@ Mediazona проверила 10 000 самых популярных домено
     └── XHTTP за СВОИМ Nginx с LE-сертификатом (НЕ за CDN); см. _reference/transports.md §3
 
 Цель: спрятать VPN-протокол на TLS-уровне
-├── Лучший выбор: VLESS+Reality+Vision+uTLS(chrome) с donor=microsoft.com или github
-└── Дополнительно: random uTLS fingerprint для разнообразия
+├── Лучший выбор: VLESS+Reality+Vision+uTLS(firefox) с donor=microsoft.com или github
+│   (edge — нет: Reality-сервер Xray ≥ v26.9.9 его отвергает, см. §6)
+└── Дополнительно: мультиплексирование — одно долгоживущее соединение вместо
+    нескольких параллельных. С июня 2026 заморозку в РФ включает связка
+    «более 3 параллельных TLS-хендшейков к одному SNI, идущих всплеском
+    (~350-400 мс между хендшейками), в пределах 60 с» на подозрительной
+    подсети (MEDIUM: Habr 1044396 от 2026-06-06, Habr 1047442 от 2026-06-15).
+    Отпечаток при этом фиксируем firefox (см. §6), менять его на лету
+    во время активной заморозки не следует.
 
 Цель: обойти blacklist VPS-IP западными AI-сервисами
 └── WARP outbound в Xray (см. §4)
